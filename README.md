@@ -176,6 +176,27 @@ D:\XAUUSD Agentic Company\
 
 ---
 
+## 🏢 Deployment & Codebase Architecture
+
+The project adopts a **Monorepo Architecture** which combines the codebase for simplified version control, while remaining fully decoupled for independent deployments:
+
+### 1. Monorepo Setup (Combined Codebase)
+- **Frontend Directory**: Exists entirely inside the [frontend/](file:///d:/XAUUSD%20Agentic%20Company/frontend/) subfolder, hosting its own `package.json` and client-side compilation logic.
+- **Backend Directory**: Positioned directly at the root folder level, containing all CrewAI agent setups and FastAPI router structures.
+- **Benefits**: Allows versioning all components under a single git repository (`XAUUSD-Agentic-AI`). Changes to shared interfaces (e.g. data contract models) can be updated, verified, and committed together in a single atomic git change.
+
+### 2. Decoupled Deployment Strategy (Separate Hosting)
+We recommend deploying the Next.js frontend to **Vercel** and the FastAPI backend to **Render.com**. Exposing them as separate services provides the following architectural benefits:
+
+- **Hosting Platform Specialization**:
+  - **Vercel (Frontend)**: Delivers Next.js pages over a global Edge CDN, ensuring sub-second load times and static asset delivery.
+  - **Render.com (Backend)**: Provides persistent, stateful containers required to support always-on WebSockets and long-running background cron tasks (`APScheduler` weekday cycles) without execution timeouts.
+- **Independent Scaling & Resource Isolation**: Heavy computations from the 6-agent CrewAI LLM pipeline run on Render and do not affect the resources serving static frontend dashboard pages. You can scale server hardware (CPU/RAM) independently based on computational load.
+- **Enhanced Fault Tolerance**: If the backend undergoes maintenance or hits API limits, the Next.js frontend dashboard remains fully online, displaying user-friendly connection warnings rather than throwing raw gateway crashes.
+- **API Key & Secrets Protection**: Exposing only the frontend to the web keeps your private `.env` keys (Groq, Telegram, FRED) strictly isolated on the backend server memory space, completely hidden from the browser network inspector.
+
+---
+
 ## ⚙️ How to Run the Platform
 
 ### 1. Database Setup
