@@ -1,10 +1,13 @@
 import logging
 import asyncio
-from typing import List, Dict, Any
+import sys
+from typing import List, Dict, Any, Optional
 from datetime import datetime
-from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException, Request, Response, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
+import requests
 from config import settings
 from governance.audit.supabase_client import db_service
 from orchestration.graph import FlowManager
@@ -20,6 +23,14 @@ except ImportError:
     SCHEDULER_AVAILABLE = False
     logger.warning("APScheduler package not installed. Scheduled task execution disabled.")
 
+# Optional starlette sse transport for MCP
+try:
+    from mcp.server.sse import SseServerTransport
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+    logger.warning("mcp python package not installed. HTTP MCP endpoints disabled.")
+
 app = FastAPI(
     title="XAUUSD Agentic Company API",
     description="Enterprise Multi-Agent Gold Trading & Observability Dashboard",
@@ -34,6 +45,59 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 1. Security Authorization Dependencies (Supabase JWT/OAuth2 Verification)
+security_bearer = HTTPBearer(auto_error=False)
+
+async def verify_supabase_jwt(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)):
+    """Verifies standard bearer token signature or query token parameter against Supabase Auth API."""
+    token = None
+    if credentials:
+        token = credentials.credentials
+    else:
+        # Fallback to query parameter (common in browser SSE clients)
+        token = request.query_params.get("token")
+
+    if not token:
+        # If no credentials exist, allow request in mock/development mode, but log warning.
+        # In strict enterprise production mode, raise 401 Unauthorized.
+        if not settings.is_supabase_configured:
+            logger.info("Anonymous access allowed on MCP endpoint (Development Mode - Supabase offline).")
+            return "developer-bypass"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization token."
+        )
+
+    if not settings.is_supabase_configured:
+        # Development mode bypass
+        logger.info(f"Bypassing JWT validation for token: {token[:8]}...")
+        return "developer-bypass"
+
+    # Call Supabase Auth endpoint to verify JWT
+    try:
+        url = f"{settings.SUPABASE_URL}/auth/v1/user"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "apikey": settings.SUPABASE_KEY
+        }
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            user_data = res.json()
+            logger.info(f"Authenticated user: {user_data.get('email')} via Supabase JWT.")
+            return user_data
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid Supabase Auth token signature: {res.text}"
+            )
+    except Exception as e:
+        logger.error(f"Supabase Auth server error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication server unavailable."
+        )
+
+# 2. Connection Manager for Websockets Live Streams
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -56,6 +120,7 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 
+# 3. Live Logs Streaming Websockets Handler
 class WebSocketLogHandler(logging.Handler):
     def __init__(self):
         super().__init__()
@@ -114,6 +179,7 @@ def scheduled_job():
     else:
         logger.info("Skipping scheduled cycle. XAUUSD market is closed (Weekend).")
 
+# 4. Standard Dashboard API Routes
 @app.get("/")
 def read_root():
     return {
@@ -225,6 +291,33 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket exception: {e}")
         ws_manager.disconnect(websocket)
 
+# 5. Model Context Protocol (MCP) Server SSE Transport Endpoints
+if MCP_AVAILABLE:
+    mcp_sse = SseServerTransport("/mcp/messages")
+
+    @app.get("/mcp/sse", dependencies=[Depends(verify_supabase_jwt)])
+    async def handle_mcp_sse(request: Request):
+        """HTTP event stream connection endpoint for MCP clients."""
+        logger.info("Initializing MCP SSE connection session...")
+        from tools.registry import mcp
+        
+        async with mcp_sse.connect_sse(
+            request.scope, request.receive, request._send
+        ) as (read_stream, write_stream):
+            # Access underlying low-level Server instance inside FastMCP
+            await mcp._mcp_server.run(
+                read_stream,
+                write_stream,
+                mcp._mcp_server.create_initialization_options()
+            )
+        return Response()
+
+    @app.post("/mcp/messages", dependencies=[Depends(verify_supabase_jwt)])
+    async def handle_mcp_messages(request: Request):
+        """JSON-RPC message transport endpoint for MCP client writes."""
+        await mcp_sse.handle_post_message(request.scope, request.receive, request._send)
+
+# 6. Service Lifecycles
 @app.on_event("startup")
 async def startup_event():
     if SCHEDULER_AVAILABLE:
@@ -238,5 +331,12 @@ async def startup_event():
         scheduler.start()
         logger.info(f"APScheduler initialized. Configured to run every {settings.RUN_INTERVAL_MINUTES} minutes (Monday to Friday only).")
 
+# 7. Subprocess standard I/O launch options (for Cursor / Claude Desktop configs)
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
+        logger.info("Launching Toolset as local Stdin/Stdout MCP Server Subprocess...")
+        from tools.registry import mcp
+        mcp.run()
+        sys.exit(0)
+        
     uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)

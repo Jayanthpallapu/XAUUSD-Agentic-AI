@@ -72,10 +72,51 @@ To enforce continuous learning:
 
 ---
 
+## 🔌 Model Context Protocol (MCP) Integrations
+
+The platform exposes all of its tools (market data, news sentiment, trading execution, and system administration) using the **Model Context Protocol (MCP)** via two main communication channels:
+
+### Method A: Local Subprocess Standard I/O (IDE Integration)
+You can connect this toolset directly to **Claude Desktop** or **Cursor** so the AI can use them:
+
+Add the following to your IDE configuration file:
+- **Claude Desktop Configuration** (typically located at `%APPDATA%\Claude\claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "xauusd-company-tools": {
+      "command": "python",
+      "args": ["d:/XAUUSD Agentic Company/main.py", "--mcp"],
+      "env": {
+        "GROQ_API_KEY": "your_groq_key_here",
+        "ALPHA_VANTAGE_API_KEY": "your_alpha_vantage_key_here",
+        "FRED_API_KEY": "your_fred_key_here",
+        "COINGECKO_API_KEY": "your_coingecko_key_here",
+        "FMP_API_KEY": "your_fmp_key_here",
+        "FINNHUB_API_KEY": "your_finnhub_key_here",
+        "TELEGRAM_BOT_TOKEN": "your_bot_token_here",
+        "TELEGRAM_CHAT_ID": "your_chat_id_here",
+        "SUPABASE_URL": "your_supabase_url",
+        "SUPABASE_KEY": "your_supabase_key"
+      }
+    }
+  }
+}
+```
+
+### Method B: Remote HTTP Server-Sent Events (SSE)
+FastAPI exposes endpoint hooks at `/mcp/sse` and `/mcp/messages` protected by **Supabase JWT verification**.
+To connect:
+1. Connect via HTTP GET to `http://localhost:8000/mcp/sse?token=YOUR_SUPABASE_JWT`.
+2. Post message frames to `http://localhost:8000/mcp/messages?token=YOUR_SUPABASE_JWT`.
+
+---
+
 ## ⚡ Technical Stack
 
 - **Framework**: CrewAI v1.14.x (Agent Orchestration & Flow Graphs)
 - **Backend Service**: FastAPI, WebSockets (Real-time live console feeds), APScheduler (Weekday CRON triggers)
+- **MCP Server**: FastMCP Python SDK (SSE Transport + Stdin/Stdout execution modes)
 - **LLM Brain**: Groq Cloud (Llama 3.3 70B & Llama 3.1 8B)
 - **Database Layer**: Supabase (PostgreSQL tables & pgvector compatibility)
 - **Frontend Client**: Next.js App Router, Tailwind CSS v4, Lucide-React Icons (Premium dark glassmorphism layout)
@@ -103,6 +144,7 @@ D:\XAUUSD Agentic Company\
 │     ├── 📄 news_calendar.py          # Google News RSS parsers & macro economic calendars
 │     ├── 📄 trading_performance.py    # Paper trade executions & risk calculators
 │     └── 📄 system.py                 # Telemetry health checkers & Telegram transmitters
+│   └── 📄 registry.py                   # FastMCP tools registrations
 │
 ├── 📁 orchestration/
 │   └── 📄 graph.py                      # FlowManager cycle routing & positions check
