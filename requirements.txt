@@ -13,3 +13,7 @@ pydantic-settings>=2.0.0
 feedparser>=6.0.10
 gunicorn>=21.2.0
 psycopg2-binary>=2.9.0
+fastmcp>=0.1.0
+litellm>=1.0.0
+
+

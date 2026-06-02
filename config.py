@@ -36,7 +36,13 @@ class Settings:
     
     @property
     def is_supabase_configured(self) -> bool:
-        return bool(self.SUPABASE_URL and self.SUPABASE_KEY)
+        if not self.SUPABASE_KEY:
+            return False
+        # Safety check: ignore placeholder values
+        placeholders = ["placeholder", "paste_your", "your_supabase", "your-supabase"]
+        if any(p in self.SUPABASE_KEY.lower() for p in placeholders):
+            return False
+        return bool(self.SUPABASE_URL)
 
     @property
     def is_telegram_configured(self) -> bool:

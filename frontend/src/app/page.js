@@ -6,6 +6,9 @@ import {
   Cpu, Award, ShieldAlert, BookOpen, Send, CheckCircle, Database, Play, PlayCircle
 } from "lucide-react";
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
+
 export default function Dashboard() {
   const [data, setData] = useState({
     agents: [
@@ -120,7 +123,7 @@ export default function Dashboard() {
     // 1. Fetch dashboard data
     const fetchDashboard = async () => {
       try {
-        const res = await fetch("http://localhost:8000/api/dashboard");
+        const res = await fetch(`${API_BASE_URL}/api/dashboard`);
         if (res.ok) {
           const apiData = await res.json();
           setData(apiData);
@@ -136,11 +139,11 @@ export default function Dashboard() {
     // 2. Connect WebSocket for live logs
     let ws;
     const connectWs = () => {
-      ws = new WebSocket("ws://localhost:8000/ws/live");
+      ws = new WebSocket(`${WS_BASE_URL}/ws/live`);
       
       ws.onopen = () => {
         setWsStatus("connected");
-        logger.info("WebSocket connected to FastAPI stream.");
+        console.log("WebSocket connected to FastAPI stream.");
       };
       
       ws.onmessage = (event) => {
@@ -179,7 +182,7 @@ export default function Dashboard() {
     setLoading(true);
     setLogs(prev => [...prev, "System: Dispatching manual analysis cycle request..."]);
     try {
-      const res = await fetch("http://localhost:8000/api/trigger-cycle", { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/trigger-cycle`, { method: "POST" });
       if (res.ok) {
         setLogs(prev => [...prev, "System: Manual cycle successfully dispatched to FastAPI background task queue."]);
       } else {
@@ -202,7 +205,7 @@ export default function Dashboard() {
   const restartAgent = async (name) => {
     setLogs(prev => [...prev, `SupervisorAgent: Attempting restart on agent node '${name}'...`]);
     try {
-      const res = await fetch(`http://localhost:8000/api/agents/${name}/restart`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/agents/${name}/restart`, { method: "POST" });
       if (res.ok) {
         setLogs(prev => [...prev, `SupervisorAgent: Node '${name}' reset successfully.`]);
       }
@@ -546,7 +549,7 @@ export default function Dashboard() {
                 <div className="flex-1 p-6 overflow-y-auto font-mono text-xs space-y-2 bg-[#090b12] text-slate-300">
                   {logs.map((log, index) => (
                     <div key={index} className="flex gap-2 items-start py-0.5 leading-relaxed">
-                      <span className="text-slate-600 select-none">[{new Date().toLocaleTimeString()}]</span>
+                      <span className="text-slate-600 select-none" suppressHydrationWarning>[{new Date().toLocaleTimeString()}]</span>
                       <span className={
                         log.startsWith("SupervisorAgent:") ? "text-amber-300" :
                         log.startsWith("TradingAgent:") ? "text-green-400 font-semibold" :

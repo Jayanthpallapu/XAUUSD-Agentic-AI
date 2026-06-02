@@ -253,6 +253,15 @@ def get_news():
     news_reports = db_service.select("gold_news_reports")
     return sorted(news_reports, key=lambda x: x.get("created_at", ""), reverse=True)
 
+@app.get("/api/debug-cycles")
+def debug_cycles():
+    return db_service.select("analysis_cycles")
+
+@app.get("/api/debug-audit")
+def debug_audit():
+    return db_service.select("audit_log")
+
+
 @app.post("/api/trigger-cycle")
 def trigger_cycle(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_cycle_background)
