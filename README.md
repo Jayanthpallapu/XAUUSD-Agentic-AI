@@ -110,6 +110,13 @@ To connect:
 1. Connect via HTTP GET to `http://localhost:8000/mcp/sse?token=YOUR_SUPABASE_JWT`.
 2. Post message frames to `http://localhost:8000/mcp/messages?token=YOUR_SUPABASE_JWT`.
 
+### 🔒 API Key & Secrets Protection
+The MCP server secures all API keys and database credentials through a multi-layer isolation model:
+1. **Source Code Isolation**: All keys are stored in a local `.env` file listed in the root `.gitignore` file, ensuring secrets are never committed to public repositories.
+2. **Backend Gateway Proxy**: The Next.js frontend has zero access to API keys. It queries only the FastAPI backend server, which loads the keys into server-side memory. Keys are never exposed to the browser or client-side network payloads.
+3. **Local IDE Integration**: In stdin/stdout subprocess mode, keys are loaded as environment variables inside your private local `claude_desktop_config.json` profile, keeping them safe from project check-ins.
+4. **Remote Access Verification**: HTTP SSE connections `/mcp/sse` are guarded by Supabase JWT verification. FastAPI validates connection tokens against your Supabase Auth service before allowing access to tool calls.
+
 ---
 
 ## ⚡ Technical Stack
