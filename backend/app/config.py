@@ -29,6 +29,7 @@ class Settings:
     FRED_API_KEY: str = os.getenv("FRED_API_KEY", "")
     FMP_API_KEY: str = os.getenv("FMP_API_KEY", "")
     COINGECKO_API_KEY: str = os.getenv("COINGECKO_API_KEY", "")
+    FINNHUB_API_KEY: str = os.getenv("FINNHUB_API_KEY", "")
     
     # Run intervals
     RUN_INTERVAL_MINUTES: int = int(os.getenv("RUN_INTERVAL_MINUTES", 15))
