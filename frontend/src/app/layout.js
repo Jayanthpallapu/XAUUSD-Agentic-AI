@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 
 export const metadata = {
   title: "XAUUSD Agentic Company - AI Multi-Agent Gold Trading Crew",
-  description: "Enterprise multi-agent intelligence system for gold trading. Includes real-time correlations analysis, news impact auditing, paper trading signals, and supervisor self-healing memory feedback loops.",
+  description: "Enterprise multi-agent intelligence platform for gold trading. Includes real-time correlations analysis, news impact auditing, paper trading signals, and supervisor self-healing memory feedback loops.",
 };
 
 export default function RootLayout({ children }) {
