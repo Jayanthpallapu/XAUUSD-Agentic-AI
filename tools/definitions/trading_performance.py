@@ -3,7 +3,7 @@ import uuid
 from typing import Dict, Any, List
 from datetime import datetime
 from crewai.tools import tool
-from app.services.supabase_client import db_service
+from governance.audit.supabase_client import db_service
 
 logger = logging.getLogger("trading_performance_tools")
 
@@ -35,7 +35,6 @@ def execute_paper_trade(
     if direction == "HOLD":
         return "No trade executed. Cycle decision is HOLD. Monitoring market for next setup."
 
-    # Perform basic sanity checks
     if entry_price <= 0 or stop_loss <= 0 or take_profit <= 0:
         return "Trade Execution Failed: Prices must be positive."
 
@@ -50,7 +49,6 @@ def execute_paper_trade(
         if take_profit >= entry_price:
             return f"Trade Execution Failed: Take Profit (${take_profit}) must be below Entry Price (${entry_price}) for SELL orders."
 
-    # Formulate trade details
     trade_id = str(uuid.uuid4())
     trade_data = {
         "id": trade_id,
@@ -71,24 +69,14 @@ def execute_paper_trade(
         trade_data["cycle_id"] = cycle_id
 
     try:
-        # Save to database
         db_service.insert("trade_signals", trade_data)
         
-        # Calculate Risk and Reward
         risk_pips = abs(entry_price - stop_loss) * 10
         reward_pips = abs(take_profit - entry_price) * 10
         rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0.0
         
-        # Position sizing: Standard $10,000 capital, 1% risk rule ($100 risk)
-        # 1 standard lot = $1 per pip change per micro lot? In standard gold specs:
-        # Gold 1.00 standard lot represents 100 ounces. 
-        # A $1.00 move = $100. So 1 pip ($0.10 move) = $10.
-        # Let's write simple pips to USD mapping. For simplicity in our paper trader:
-        # Standard size = 0.1 lots. 0.1 lots on Gold = $1 per $1 movement (10 pips = $1).
-        # We will assume a fixed trade size of 0.5 lot (which is $50 per $1 gold movement).
-        # Standard gold point: 1 pip = $0.10 price change.
         lot_size = 0.5 
-        risk_usd = (risk_pips / 10.0) * (lot_size * 100) # Lot size * 100 oz * change
+        risk_usd = (risk_pips / 10.0) * (lot_size * 100)
         
         return (
             f"✅ SIMULATED TRADE PLACED SUCCESSFULLY!\n"
@@ -138,13 +126,10 @@ def fetch_trade_performance() -> str:
         
         total_pnl_usd = sum(float(t.get("pnl_usd", 0.0) or 0.0) for t in trades)
         
-        # Calculate max drawdown (simplified over time)
-        # Starting capital is $10,000
         starting_capital = 10000.0
         running_balance = starting_capital
         balances = [starting_capital]
         
-        # Sort closed trades by closed_at time to simulate balance curve
         sorted_trades = sorted(
             [t for t in closed_trades if t.get("closed_at")], 
             key=lambda x: x.get("closed_at")
@@ -163,7 +148,6 @@ def fetch_trade_performance() -> str:
             if drawdown > max_drawdown_pct:
                 max_drawdown_pct = drawdown
 
-        # Simple profit factor calculation
         total_gains = sum(float(t.get("pnl_usd", 0.0) or 0.0) for t in winning_trades)
         total_losses = abs(sum(float(t.get("pnl_usd", 0.0) or 0.0) for t in losing_trades))
         profit_factor = (total_gains / total_losses) if total_losses > 0 else (total_gains if total_gains > 0 else 1.0)
@@ -197,7 +181,6 @@ def record_teacher_feedback(trade_id: str, notes: str) -> str:
             
         db_service.update("trade_signals", filters, {"teacher_notes": notes})
         
-        # Log lesson learned in Agent Registry for QAAgent and TradingAgent
         db_service.save_lesson(
             agent_name="TradingAgent", 
             mistake=f"Suboptimal trade placement on Trade ID {trade_id[:8]}", 

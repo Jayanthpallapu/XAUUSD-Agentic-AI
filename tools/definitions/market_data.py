@@ -2,7 +2,7 @@ import logging
 import requests
 from typing import Dict, Any, List
 from crewai.tools import tool
-from app.config import settings
+from config import settings
 
 logger = logging.getLogger("market_data_tools")
 
@@ -73,7 +73,6 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
 
     # Try Frankfurter API (Free, no key needed)
     try:
-        # Frankfurter is based on USD or EUR
         url = "https://api.frankfurter.dev/latest?from=USD"
         res = requests.get(url, timeout=10)
         data = res.json()
@@ -88,7 +87,6 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
             elif pair.endswith("USD") and len(pair) == 6:
                 base = pair[:3]
                 if base in rates:
-                    # e.g., EURUSD is 1 / USDEUR
                     rate = 1.0 / rates[base]
                     frankfurter_rates.append(f"{pair}: {rate:.4f}")
                     
@@ -115,7 +113,6 @@ def fetch_commodities_prices() -> str:
 
     # Use yfinance
     if YFINANCE_AVAILABLE:
-        # Silver: SI=F, WTI Oil: CL=F, Brent: BZ=F, Copper: HG=F
         tickers = {
             "Silver (XAG/USD)": "SI=F",
             "WTI Crude Oil": "CL=F",
@@ -150,7 +147,7 @@ def fetch_crypto_prices() -> str:
         except Exception as e:
             logger.error(f"CoinGecko fetch failed: {e}")
 
-    # No key CoinGecko public API (highly rate limited, but works sometimes)
+    # No key CoinGecko public API
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
         res = requests.get(url, timeout=10)
@@ -178,7 +175,6 @@ def fetch_market_indices() -> str:
     results = []
 
     if YFINANCE_AVAILABLE:
-        # DXY: DX-Y.NYB, S&P 500: ^GSPC, VIX: ^VIX
         tickers = {
             "US Dollar Index (DXY)": "DX-Y.NYB",
             "S&P 500 (^GSPC)": "^GSPC",
@@ -201,7 +197,6 @@ def fetch_market_indices() -> str:
 @tool("Treasury Yields Fetcher")
 def fetch_treasury_yields() -> str:
     """Fetches the current yield of the US 10-Year Treasury Bond (US10Y)."""
-    # Try FRED API if key exists
     if settings.FRED_API_KEY:
         try:
             url = f"https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&limit=1&sort_order=desc&file_type=json&api_key={settings.FRED_API_KEY}"
@@ -214,7 +209,6 @@ def fetch_treasury_yields() -> str:
         except Exception as e:
             logger.error(f"FRED API yields fetch failed: {e}")
 
-    # Fallback to yfinance ticker ^TNX (10 Year Treasury Yield index, e.g. 44.50 = 4.45%)
     if YFINANCE_AVAILABLE:
         try:
             ticker = yf.Ticker("^TNX")

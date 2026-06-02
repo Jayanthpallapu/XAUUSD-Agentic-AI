@@ -2,7 +2,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import uuid
-from app.config import settings
+from config import settings
 
 logger = logging.getLogger("supabase_client")
 
@@ -177,7 +177,6 @@ class DatabaseService:
             return res.data[0] if res.data else data
         except Exception as e:
             logger.error(f"Error inserting into {table}: {e}")
-            # Degrade gracefully to mock
             return self.mock_db.insert(table, data)
 
     def select(self, table: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -208,11 +207,9 @@ class DatabaseService:
             return self.mock_db.update(table, filters, data)
 
     def update_agent_status(self, agent_name: str, status: str, errors_delta: int = 0, tasks_delta: int = 0, response_time_ms: float = 0.0):
-        # Update heartbeat, status, error increments, response times
         filters = {"name": agent_name}
         agents = self.select("agent_registry", filters)
         if not agents:
-            # Create a mock agent first
             self.insert("agent_registry", {"name": agent_name, "role": "Worker Agent", "status": status})
             agents = self.select("agent_registry", filters)
             
@@ -220,7 +217,6 @@ class DatabaseService:
         new_errors = agent.get("total_errors", 0) + errors_delta
         new_tasks = agent.get("total_tasks_completed", 0) + tasks_delta
         
-        # Simple rolling average for response time
         curr_avg = agent.get("avg_response_time_ms", 0.0)
         curr_tasks = agent.get("total_tasks_completed", 0)
         if response_time_ms > 0:
@@ -258,8 +254,6 @@ class DatabaseService:
             "lesson": lesson
         })
         
-        # Calculate new accuracy score based on corrections
-        # Formula: Accuracy goes down as mistakes accumulate unless we clear them
         error_count = len(lessons)
         new_accuracy = max(0.2, 1.0 - (error_count * 0.1))
         

@@ -3,8 +3,8 @@ import requests
 from typing import Dict, Any, List
 from datetime import datetime
 from crewai.tools import tool
-from app.config import settings
-from app.services.supabase_client import db_service
+from config import settings
+from governance.audit.supabase_client import db_service
 
 logger = logging.getLogger("system_tools")
 
@@ -55,14 +55,12 @@ def restart_agent_node(agent_name: str) -> str:
         if not agents:
             return f"Error: Agent '{agent_name}' is not registered in the system."
             
-        # Update agent status
         db_service.update("agent_registry", filters, {
             "status": "active",
             "total_errors": 0,
             "last_heartbeat": datetime.utcnow().isoformat()
         })
         
-        # Log audit action
         db_service.insert("audit_log", {
             "agent_name": "SupervisorAgent",
             "action": f"RESTART_AGENT_{agent_name}",
@@ -92,7 +90,6 @@ def send_telegram_notification(title: str, message: str, level: str = "info") ->
         f"{message}"
     )
     
-    # Save notification to Supabase database first
     try:
         db_service.insert("notifications", {
             "level": level,
@@ -104,7 +101,6 @@ def send_telegram_notification(title: str, message: str, level: str = "info") ->
     except Exception as e:
         logger.error(f"Error saving notification to DB: {e}")
 
-    # Send telegram request if configured
     if settings.is_telegram_configured:
         try:
             url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -116,8 +112,6 @@ def send_telegram_notification(title: str, message: str, level: str = "info") ->
             res = requests.post(url, json=payload, timeout=10)
             
             if res.status_code == 200:
-                # Mark as telegram sent in DB
-                # Search for latest notification we just inserted
                 notifs = db_service.select("notifications", {"title": title, "level": level})
                 if notifs:
                     latest = max(notifs, key=lambda x: x.get("created_at", ""))
@@ -130,6 +124,5 @@ def send_telegram_notification(title: str, message: str, level: str = "info") ->
             logger.error(f"Telegram notification request failed: {e}")
             return f"Telegram notification failed to transmit: {str(e)}"
             
-    # Dev stdout fallback
     logger.info(f"TELEGRAM DEV OUTPUT:\n{formatted_msg}")
     return f"Telegram notification printed to local logs (Telegram bot credentials not configured in backend)."

@@ -3,7 +3,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load env variables from .env if it exists
-dotenv_path = Path(__file__).resolve().parent.parent / '.env'
+dotenv_path = Path(__file__).resolve().parent / '.env'
 if dotenv_path.exists():
     load_dotenv(dotenv_path)
 else:

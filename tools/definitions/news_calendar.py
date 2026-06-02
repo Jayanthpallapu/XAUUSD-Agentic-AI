@@ -4,7 +4,7 @@ import feedparser
 from typing import List, Dict, Any
 from datetime import datetime
 from crewai.tools import tool
-from app.config import settings
+from config import settings
 
 logger = logging.getLogger("news_calendar_tools")
 
@@ -19,7 +19,7 @@ def fetch_news_rss(query: str = "gold price XAUUSD forex") -> str:
     
     try:
         feed = feedparser.parse(rss_url)
-        entries = feed.entries[:8]  # Limit to 8 latest items
+        entries = feed.entries[:8]
         
         if not entries:
             return f"No news found on Google News RSS for query: {query}"
@@ -31,7 +31,6 @@ def fetch_news_rss(query: str = "gold price XAUUSD forex") -> str:
             source = entry.source.get("title", "Google News")
             link = entry.link
             
-            # Perform naive local sentiment estimation for tool helper output
             sentiment = "Neutral"
             lower_title = title.lower()
             bullish_words = ["rise", "surge", "gain", "higher", "bullish", "buying", "rally", "strengthens", "inflation", "cut", "up"]
@@ -100,7 +99,6 @@ def analyze_news_sentiment() -> str:
         except Exception as e:
             logger.error(f"Alpha Vantage news sentiment failed: {e}")
 
-    # Fallback/Default Local Text Analysis of Gold headlines
     try:
         feed = feedparser.parse("https://news.google.com/rss/search?q=gold+price+forex&hl=en-US")
         entries = feed.entries[:5]
@@ -113,7 +111,6 @@ def analyze_news_sentiment() -> str:
             title = entry.title
             lower_title = title.lower()
             
-            # Simple keyword matching
             bull_words = ["rise", "high", "rally", "gain", "inflation", "cuts", "geopolitical", "risk", "war", "tensions", "buying"]
             bear_words = ["fall", "drop", "hike", "stronger dollar", "yields rise", "selling", "plummets", "slump"]
             
@@ -121,15 +118,12 @@ def analyze_news_sentiment() -> str:
             bear = sum(1 for w in bear_words if w in lower_title)
             
             label = "Neutral"
-            score = 0.0
             if bull > bear:
                 bullish_indicators += 1
                 label = "Somewhat Bullish"
-                score = 0.35
             elif bear > bull:
                 bearish_indicators += 1
                 label = "Somewhat Bearish"
-                score = -0.35
                 
             headlines.append(f"- {title} ({label})")
             
@@ -160,7 +154,6 @@ def fetch_economic_calendar() -> str:
     """
     if settings.FMP_API_KEY:
         try:
-            # Format: YYYY-MM-DD
             today = datetime.utcnow().strftime("%Y-%m-%d")
             url = f"https://financialmodelingprep.com/api/v3/economic_calendar?from={today}&to={today}&apikey={settings.FMP_API_KEY}"
             res = requests.get(url, timeout=10)
@@ -183,7 +176,6 @@ def fetch_economic_calendar() -> str:
         except Exception as e:
             logger.error(f"FMP calendar API failed: {e}")
 
-    # Generate a realistic mock economic calendar for gold traders depending on weekday
     weekday = datetime.utcnow().weekday()
     days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     day_name = days[weekday]

@@ -1,9 +1,9 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
-from app.services.supabase_client import db_service
-from app.agents.crew_setup import create_market_crew_flow
-from app.tools.market_data import fetch_gold_price
+from governance.audit.supabase_client import db_service
+from agents.orchestrator.agent import create_market_crew_flow
+from tools.definitions.market_data import fetch_gold_price
 import re
 
 logger = logging.getLogger("flow_manager")
@@ -17,14 +17,11 @@ class FlowManager:
         """
         closed_signals = []
         try:
-            # 1. Fetch current gold price
             gold_str = fetch_gold_price()
-            # Extract numerical price from string e.g., "Gold (XAU/USD) Price: $2645.30 USD"
             match = re.search(r"\$(\d+(?:\.\d+)?)\s*USD", gold_str)
             if not match:
                 match = re.search(r"\$(\d+(?:\.\d+)?)\s*Futures", gold_str)
             if not match:
-                # Catch general number
                 match = re.search(r"(\d{3,5}\.\d{1,2})", gold_str)
                 
             if not match:
@@ -34,7 +31,6 @@ class FlowManager:
             current_price = float(match.group(1))
             logger.info(f"Checking open positions against current spot price: ${current_price:.2f}")
 
-            # 2. Fetch all active positions
             active_trades = db_service.select("trade_signals", {"status": "active"})
             for trade in active_trades:
                 trade_id = trade["id"]
@@ -44,7 +40,7 @@ class FlowManager:
                 tp = float(trade["take_profit"])
                 
                 lot_size = 0.5
-                multiplier = lot_size * 100  # 100 oz per standard lot, so 50x price change
+                multiplier = lot_size * 100
                 
                 closed = False
                 status = "active"
@@ -56,13 +52,13 @@ class FlowManager:
                     if current_price <= sl:
                         closed = True
                         status = "closed_loss"
-                        close_price = sl  # Assume execution at SL
+                        close_price = sl
                         pnl_pips = (sl - entry) * 10
                         pnl_usd = (sl - entry) * multiplier
                     elif current_price >= tp:
                         closed = True
                         status = "closed_win"
-                        close_price = tp  # Assume execution at TP
+                        close_price = tp
                         pnl_pips = (tp - entry) * 10
                         pnl_usd = (tp - entry) * multiplier
                         
@@ -100,16 +96,10 @@ class FlowManager:
     @staticmethod
     def run_cycle() -> Dict[str, Any]:
         """
-        Manages a single analysis cycle:
-        1. Closes out active trades matching SL/TP conditions.
-        2. Inserts an analysis cycle row in the database.
-        3. Starts the CrewAI agents pipeline.
-        4. Broadcasts results or reports error logs.
+        Manages a single analysis cycle.
         """
-        # First close any expired trades
         FlowManager.check_and_close_trades()
         
-        # Insert a new analysis cycle
         cycle_data = {
             "status": "running",
             "started_at": datetime.utcnow().isoformat()
@@ -125,17 +115,12 @@ class FlowManager:
             end_time = datetime.utcnow()
             duration = (end_time - start_time).total_seconds()
             
-            # Update cycle status to completed
             db_service.update("analysis_cycles", {"id": cycle_id}, {
                 "status": "completed",
                 "completed_at": end_time.isoformat(),
                 "duration_seconds": duration
             })
             
-            # Broadcast news impact alerts if there are any high-impact events
-            if results.get("news", {}).get("is_high_impact", False):
-                logger.info(f"🚨 HIGH IMPACT News Detected during cycle {cycle_id}")
-                
             return results
         except Exception as e:
             logger.error(f"Analysis Cycle ID {cycle_id} encountered critical failure: {e}")
@@ -144,7 +129,6 @@ class FlowManager:
                 "completed_at": datetime.utcnow().isoformat(),
                 "duration_seconds": (datetime.utcnow() - start_time).total_seconds()
             })
-            # Log error event to database
             db_service.insert("audit_log", {
                 "agent_name": "SupervisorAgent",
                 "action": "CYCLE_EXECUTION_FAILURE",
@@ -157,12 +141,10 @@ class FlowManager:
     def backfill_lessons(days: int = 15):
         """
         Downloads historical price data from yfinance for backfilling lessons learned.
-        Simulates past market cycles to train agents on macro correlation mistakes.
         """
         logger.info(f"Initiating historical backfill lessons training for past {days} days...")
         try:
             import yfinance as yf
-            # Fetch Gold futures (GC=F) and Dollar index (DX-Y.NYB)
             start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
             data = yf.download(["GC=F", "DX-Y.NYB"], start=start_date, interval="1d")
             
@@ -171,12 +153,6 @@ class FlowManager:
                 FlowManager._seed_default_lessons()
                 return
                 
-            # Create training feedback logs representing historical learning
-            # For example, if USD index rises, Gold should fall. Let's record these as historical corrections.
-            lessons_seeded = 0
-            
-            # Formulate training feedback based on correlation logic
-            # Seed 3 high-quality educational lessons
             db_service.save_lesson(
                 agent_name="CorrelationAgent",
                 mistake="Underestimated inverse US Dollar Index correlation strength during FOMC inflation releases.",
@@ -204,7 +180,6 @@ class FlowManager:
 
     @staticmethod
     def _seed_default_lessons():
-        """Fallback to seed default training logs in case of offline/API errors."""
         db_service.save_lesson(
             agent_name="TradingAgent",
             mistake="Entered BUY trade at local resistance level ($2680.00) without confluence.",
@@ -212,4 +187,3 @@ class FlowManager:
             lesson="Buying at horizontal resistance reduces Risk/Reward profiles and leads to high-rate drawdown events."
         )
         logger.info("Default mock training lessons seeded in Agent registry.")
-FlowManager.backfill_lessons()

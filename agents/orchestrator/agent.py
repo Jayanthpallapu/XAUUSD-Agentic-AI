@@ -1,9 +1,9 @@
 import logging
 from typing import Dict, Any, List
 from crewai import Agent, Task, Crew, Process, LLM
-from app.config import settings
-from app.services.supabase_client import db_service
-from app.models.models import (
+from config import settings
+from governance.audit.supabase_client import db_service
+from api.schemas.models import (
     CorrelationReport,
     GoldNewsReport,
     TradeSignal,
@@ -12,8 +12,8 @@ from app.models.models import (
     SupervisorReport
 )
 
-# Import all tools
-from app.tools.market_data import (
+# Import tools using absolute project imports
+from tools.definitions.market_data import (
     fetch_gold_price,
     fetch_forex_prices,
     fetch_commodities_prices,
@@ -21,17 +21,17 @@ from app.tools.market_data import (
     fetch_market_indices,
     fetch_treasury_yields
 )
-from app.tools.news_calendar import (
+from tools.definitions.news_calendar import (
     fetch_news_rss,
     analyze_news_sentiment,
     fetch_economic_calendar
 )
-from app.tools.trading_performance import (
+from tools.definitions.trading_performance import (
     execute_paper_trade,
     fetch_trade_performance,
     record_teacher_feedback
 )
-from app.tools.system import (
+from tools.definitions.system import (
     check_agent_health,
     restart_agent_node,
     send_telegram_notification
@@ -39,7 +39,6 @@ from app.tools.system import (
 
 logger = logging.getLogger("crew_setup")
 
-# Initialize Groq LLM
 def get_llm(model_name: str = "groq/llama-3.3-70b-versatile") -> LLM:
     if settings.GROQ_API_KEY:
         try:
@@ -50,15 +49,12 @@ def get_llm(model_name: str = "groq/llama-3.3-70b-versatile") -> LLM:
             )
         except Exception as e:
             logger.error(f"Error creating LLM: {e}. Falling back to default system model.")
-    
-    # Return a basic LLM structure (CrewAI might fail if api_key is blank, so we inject dummy text)
     return LLM(
         model="groq/llama-3.1-8b-instant",
         api_key="gsk_mock_key_for_offline_runs"
     )
 
 def fetch_lessons_backstory(agent_name: str) -> str:
-    """Fetches lessons learned for an agent from the database and formats them for the backstory."""
     try:
         res = db_service.select("agent_registry", {"name": agent_name})
         if res:
@@ -66,7 +62,7 @@ def fetch_lessons_backstory(agent_name: str) -> str:
             lessons = agent.get("lessons_learned", [])
             if lessons and isinstance(lessons, list):
                 formatted = "\nCRITICAL LESSONS LEARNED FROM PAST MISTAKES (You MUST avoid repeating these):\n"
-                for idx, item in enumerate(lessons[-5:]):  # Limit to 5 most recent lessons to save tokens
+                for idx, item in enumerate(lessons[-5:]):
                     formatted += f"Lesson {idx+1}:\n- Past Mistake: {item.get('mistake')}\n- Corrective Action: {item.get('correction')}\n- Teacher Lesson: {item.get('lesson')}\n"
                 return formatted
     except Exception as e:
@@ -199,16 +195,14 @@ def create_supervisor_agent(llm: LLM) -> Agent:
             send_telegram_notification
         ],
         llm=llm,
-        allow_delegation=True, # Supervisor can assign actions/tasks
+        allow_delegation=True,
         max_iter=15,
         verbose=True
     )
 
 def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
-    """Runs the multi-crew agent pipeline and returns the structured outputs of each task."""
     llm = get_llm()
     
-    # 1. Instantiate Agents
     corr_agent = create_correlation_agent(llm)
     news_agent = create_news_agent(llm)
     trade_agent = create_trading_agent(llm)
@@ -216,7 +210,6 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     perf_agent = create_performance_agent(llm)
     supervisor_agent = create_supervisor_agent(llm)
     
-    # 2. Define Tasks
     corr_task = Task(
         description="Fetch forex prices, index prices, crypto rates, commodity rates, and treasury yields. Research how correlated markets are moving. Analyze recent correlated news RSS.",
         expected_output="A structured report evaluating correlation alignment metrics.",
@@ -231,22 +224,19 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
         output_pydantic=GoldNewsReport
     )
     
-    # Run Research Crew in Parallel
     research_crew = Crew(
         agents=[corr_agent, news_agent],
         tasks=[corr_task, news_task],
-        process=Process.sequential,  # Run sequentially within the crew, but we call kickoff
+        process=Process.sequential,
         verbose=True
     )
     
     logger.info("Starting Research Crew kickoff...")
     research_results = research_crew.kickoff()
     
-    # Extract research outputs
     corr_output = research_results.tasks_output[0].pydantic
     news_output = research_results.tasks_output[1].pydantic
     
-    # Save research outputs to database
     db_service.insert("correlation_reports", {
         "cycle_id": cycle_id,
         "pair_correlations": [p.dict() for p in corr_output.pair_correlations],
@@ -266,7 +256,6 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     })
     db_service.update_agent_status("NewsAgent", "active", tasks_delta=1)
 
-    # 3. Trading Signal Task (Sequential - uses research outputs in description)
     trade_task = Task(
         description=(
             f"Observe the current gold price. Using the Correlation Report: {corr_output.summary} "
@@ -279,7 +268,6 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
         output_pydantic=TradeSignal
     )
     
-    # 4. QA Task (Reviewer)
     qa_task = Task(
         description=(
             "Review the research findings, news analysis, and the resulting Trade Signal. "
@@ -316,15 +304,12 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     db_service.update_agent_status("TradingAgent", "active", tasks_delta=1)
     db_service.update_agent_status("QAAgent", "active", tasks_delta=1)
 
-    # If the QA agent rejected the trade signal, we update the trade signal in DB to 'rejected'
     if qa_output.approval_status == "rejected":
-        # Find the trade inserted during this cycle and update its status to 'expired' or 'rejected'
         signals = db_service.select("trade_signals", {"cycle_id": cycle_id})
         if signals:
             db_service.update("trade_signals", {"id": signals[0]["id"]}, {"status": "expired"})
             logger.info(f"QA Agent rejected trade signal. Trade ID {signals[0]['id'][:8]} marked as expired/rejected.")
 
-    # 5. Performance Monitoring Task
     perf_task = Task(
         description="Analyze closed trade results using the Trade Performance Fetcher tool. Compile portfolio statistics (win rate, total PnL, drawdowns, Sharpe) and assess current agent performance scores.",
         expected_output="A compiled portfolio performance and accuracy scorecard.",
@@ -357,8 +342,6 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     })
     db_service.update_agent_status("PerformanceAgent", "active", tasks_delta=1)
 
-    # 6. Head Supervisor Task
-    # Check agent statuses, run health, apply feedback, send Telegram message.
     supervisor_task = Task(
         description=(
             "Run the Agent Health Monitor tool to diagnose node health. If any node has high error counts, "
@@ -391,7 +374,6 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     })
     db_service.update_agent_status("SupervisorAgent", "active", tasks_delta=1)
 
-    # Return full execution results
     return {
         "correlation": corr_output.dict(),
         "news": news_output.dict(),

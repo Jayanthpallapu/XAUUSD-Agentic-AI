@@ -15,7 +15,6 @@ def update_env_file(chat_id):
     with open(ENV_PATH, "r") as f:
         content = f.read()
         
-    # Replace placeholder with actual chat id
     new_content = re.sub(
         r"TELEGRAM_CHAT_ID=.*",
         f"TELEGRAM_CHAT_ID={chat_id}",
@@ -32,7 +31,6 @@ if __name__ == "__main__":
     
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     
-    # Try polling a few times
     found = False
     for attempt in range(5):
         try:
@@ -56,9 +54,9 @@ if __name__ == "__main__":
                     print(f"\n[SUCCESS] Successfully detected message from: {first_name} (@{username})")
                     print(f"Detected Chat ID: {chat_id}")
                     
-                    print("Updating backend/.env configuration file...")
+                    print("Updating .env configuration file...")
                     if update_env_file(chat_id):
-                        print("[v] backend/.env successfully updated with your TELEGRAM_CHAT_ID!")
+                        print("[v] .env successfully updated with your TELEGRAM_CHAT_ID!")
                     found = True
                     break
             else:
