@@ -16,6 +16,11 @@ export const metadata = {
   description: "Enterprise multi-agent intelligence platform for gold trading. Includes real-time correlations analysis, news impact auditing, paper trading signals, and supervisor self-healing memory feedback loops.",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({ children }) {
   return (
     <html

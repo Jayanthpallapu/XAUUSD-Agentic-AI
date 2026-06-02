@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 import sys
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -31,17 +32,26 @@ except ImportError:
     MCP_AVAILABLE = False
     logger.warning("mcp python package not installed. HTTP MCP endpoints disabled.")
 
+from contextlib import asynccontextmanager
+
 app = FastAPI(
     title="XAUUSD Agentic Company API",
     description="Enterprise Multi-Agent Gold Trading & Observability Dashboard",
     version="1.0.0"
 )
 
+# Restrict CORS to the configured frontend URL only (never wildcard in production)
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("FRONTEND_URL", "http://localhost:3000").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -124,7 +134,14 @@ ws_manager = ConnectionManager()
 class WebSocketLogHandler(logging.Handler):
     def __init__(self):
         super().__init__()
-        self.loop = asyncio.get_event_loop()
+        self._loop = None
+
+    def _get_loop(self):
+        """Lazily fetch the running event loop to avoid deprecation warnings."""
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return None
 
     def emit(self, record):
         log_entry = self.format(record)
@@ -135,10 +152,12 @@ class WebSocketLogHandler(logging.Handler):
             "message": log_entry
         }
         if ws_manager.active_connections:
-            try:
-                asyncio.run_coroutine_threadsafe(ws_manager.broadcast(message), self.loop)
-            except Exception:
-                pass
+            loop = self._get_loop()
+            if loop and loop.is_running():
+                try:
+                    asyncio.run_coroutine_threadsafe(ws_manager.broadcast(message), loop)
+                except Exception:
+                    pass
 
 ws_log_handler = WebSocketLogHandler()
 ws_log_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
@@ -326,19 +345,24 @@ if MCP_AVAILABLE:
         """JSON-RPC message transport endpoint for MCP client writes."""
         await mcp_sse.handle_post_message(request.scope, request.receive, request._send)
 
-# 6. Service Lifecycles
-@app.on_event("startup")
-async def startup_event():
+# 6. Service Lifecycles (lifespan replaces deprecated @app.on_event)
+@asynccontextmanager
+async def lifespan(app):
+    # Startup
     if SCHEDULER_AVAILABLE:
         scheduler = BackgroundScheduler()
         scheduler.add_job(
-            scheduled_job, 
-            "interval", 
+            scheduled_job,
+            "interval",
             minutes=settings.RUN_INTERVAL_MINUTES,
             id="market_analysis_cycle"
         )
         scheduler.start()
         logger.info(f"APScheduler initialized. Configured to run every {settings.RUN_INTERVAL_MINUTES} minutes (Monday to Friday only).")
+    yield
+    # Shutdown (add cleanup here if needed)
+
+app.router.lifespan_context = lifespan
 
 # 7. Subprocess standard I/O launch options (for Cursor / Claude Desktop configs)
 if __name__ == "__main__":
@@ -347,5 +371,6 @@ if __name__ == "__main__":
         from tools.registry import mcp
         mcp.run()
         sys.exit(0)
-        
-    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)
+
+    # Production: do NOT use reload=True — it is a dev-only flag
+    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT)
