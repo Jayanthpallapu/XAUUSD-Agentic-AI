@@ -8,6 +8,7 @@ import re
 
 logger = logging.getLogger("flow_manager")
 
+
 class FlowManager:
     @staticmethod
     def check_and_close_trades() -> List[Dict[str, Any]]:
@@ -23,13 +24,17 @@ class FlowManager:
                 match = re.search(r"\$(\d+(?:\.\d+)?)\s*Futures", gold_str)
             if not match:
                 match = re.search(r"(\d{3,5}\.\d{1,2})", gold_str)
-                
+
             if not match:
-                logger.error(f"Could not parse gold price to evaluate active positions. Raw price string: {gold_str}")
+                logger.error(
+                    f"Could not parse gold price to evaluate active positions. Raw price string: {gold_str}"
+                )
                 return []
-                
+
             current_price = float(match.group(1))
-            logger.info(f"Checking open positions against current spot price: ${current_price:.2f}")
+            logger.info(
+                f"Checking open positions against current spot price: ${current_price:.2f}"
+            )
 
             active_trades = db_service.select("trade_signals", {"status": "active"})
             for trade in active_trades:
@@ -38,16 +43,16 @@ class FlowManager:
                 entry = float(trade["entry_price"])
                 sl = float(trade["stop_loss"])
                 tp = float(trade["take_profit"])
-                
+
                 lot_size = 0.5
                 multiplier = lot_size * 100
-                
+
                 closed = False
                 status = "active"
                 close_price = None
                 pnl_pips = 0.0
                 pnl_usd = 0.0
-                
+
                 if direction == "BUY":
                     if current_price <= sl:
                         closed = True
@@ -61,7 +66,7 @@ class FlowManager:
                         close_price = tp
                         pnl_pips = (tp - entry) * 10
                         pnl_usd = (tp - entry) * multiplier
-                        
+
                 elif direction == "SELL":
                     if current_price >= sl:
                         closed = True
@@ -82,15 +87,17 @@ class FlowManager:
                         "close_price": close_price,
                         "pnl_pips": pnl_pips,
                         "pnl_usd": pnl_usd,
-                        "closed_at": datetime.utcnow().isoformat()
+                        "closed_at": datetime.utcnow().isoformat(),
                     }
                     db_service.update("trade_signals", {"id": trade_id}, update_data)
-                    logger.info(f"Closed Trade {trade_id[:8]} ({direction}) as {status.upper()} at price: ${close_price:.2f}. PnL: ${pnl_usd:.2f}")
+                    logger.info(
+                        f"Closed Trade {trade_id[:8]} ({direction}) as {status.upper()} at price: ${close_price:.2f}. PnL: ${pnl_usd:.2f}"
+                    )
                     closed_signals.append({**trade, **update_data})
-                    
+
         except Exception as e:
             logger.error(f"Error checking and closing trades: {e}")
-            
+
         return closed_signals
 
     @staticmethod
@@ -99,42 +106,54 @@ class FlowManager:
         Manages a single analysis cycle.
         """
         FlowManager.check_and_close_trades()
-        
-        cycle_data = {
-            "status": "running",
-            "started_at": datetime.utcnow().isoformat()
-        }
+
+        cycle_data = {"status": "running", "started_at": datetime.utcnow().isoformat()}
         cycle = db_service.insert("analysis_cycles", cycle_data)
         cycle_id = cycle["id"]
-        
+
         start_time = datetime.utcnow()
         try:
             logger.info(f"Launching Analysis Cycle ID: {cycle_id}")
             results = create_market_crew_flow(cycle_id)
-            
+
             end_time = datetime.utcnow()
             duration = (end_time - start_time).total_seconds()
-            
-            db_service.update("analysis_cycles", {"id": cycle_id}, {
-                "status": "completed",
-                "completed_at": end_time.isoformat(),
-                "duration_seconds": duration
-            })
-            
+
+            db_service.update(
+                "analysis_cycles",
+                {"id": cycle_id},
+                {
+                    "status": "completed",
+                    "completed_at": end_time.isoformat(),
+                    "duration_seconds": duration,
+                },
+            )
+
             return results
         except Exception as e:
-            logger.error(f"Analysis Cycle ID {cycle_id} encountered critical failure: {e}")
-            db_service.update("analysis_cycles", {"id": cycle_id}, {
-                "status": "failed",
-                "completed_at": datetime.utcnow().isoformat(),
-                "duration_seconds": (datetime.utcnow() - start_time).total_seconds()
-            })
-            db_service.insert("audit_log", {
-                "agent_name": "SupervisorAgent",
-                "action": "CYCLE_EXECUTION_FAILURE",
-                "status": "error",
-                "error_message": str(e)
-            })
+            logger.error(
+                f"Analysis Cycle ID {cycle_id} encountered critical failure: {e}"
+            )
+            db_service.update(
+                "analysis_cycles",
+                {"id": cycle_id},
+                {
+                    "status": "failed",
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "duration_seconds": (
+                        datetime.utcnow() - start_time
+                    ).total_seconds(),
+                },
+            )
+            db_service.insert(
+                "audit_log",
+                {
+                    "agent_name": "SupervisorAgent",
+                    "action": "CYCLE_EXECUTION_FAILURE",
+                    "status": "error",
+                    "error_message": str(e),
+                },
+            )
             raise e
 
     @staticmethod
@@ -142,38 +161,45 @@ class FlowManager:
         """
         Downloads historical price data from yfinance for backfilling lessons learned.
         """
-        logger.info(f"Initiating historical backfill lessons training for past {days} days...")
+        logger.info(
+            f"Initiating historical backfill lessons training for past {days} days..."
+        )
         try:
             import yfinance as yf
+
             start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
             data = yf.download(["GC=F", "DX-Y.NYB"], start=start_date, interval="1d")
-            
+
             if data.empty:
-                logger.warning("No historical yfinance data returned. Seeding default training lessons.")
+                logger.warning(
+                    "No historical yfinance data returned. Seeding default training lessons."
+                )
                 FlowManager._seed_default_lessons()
                 return
-                
+
             db_service.save_lesson(
                 agent_name="CorrelationAgent",
                 mistake="Underestimated inverse US Dollar Index correlation strength during FOMC inflation releases.",
                 correction="Correlate price shifts with DXY. A DXY rise above 104.8 should trigger a Gold bearish bias shift.",
-                lesson="Gold price is heavily inversely correlated to the DXY. Always verify DXY trend strength before setting a Gold trend."
+                lesson="Gold price is heavily inversely correlated to the DXY. Always verify DXY trend strength before setting a Gold trend.",
             )
             db_service.save_lesson(
                 agent_name="TradingAgent",
                 mistake="Placed BUY position during a strong US10Y treasury yields breakout, resulting in SL hit.",
                 correction="Never buy XAUUSD if US10Y yields are breaking out above resistance, even if spot gold looks oversold.",
-                lesson="Yields rise represents high opportunity cost for holding non-yielding gold, creating institutional selling pressure."
+                lesson="Yields rise represents high opportunity cost for holding non-yielding gold, creating institutional selling pressure.",
             )
             db_service.save_lesson(
                 agent_name="NewsAgent",
                 mistake="Classified a minor Fed member commentary as a high-impact calendar event, triggering false alarms.",
                 correction="Check the official calendar impact rating first. Only rate FOMC Chair Powell speech, CPI, NFP, and rate decisions as high impact.",
-                lesson="Filter out noise from minor speeches to prevent system warnings from spamming the Telegram notifications channel."
+                lesson="Filter out noise from minor speeches to prevent system warnings from spamming the Telegram notifications channel.",
             )
-            
-            logger.info("Successfully completed database backfill. Dynamic backstory lessons populated for all agent registry nodes.")
-            
+
+            logger.info(
+                "Successfully completed database backfill. Dynamic backstory lessons populated for all agent registry nodes."
+            )
+
         except Exception as e:
             logger.error(f"Error executing database backfill: {e}")
             FlowManager._seed_default_lessons()
@@ -184,6 +210,6 @@ class FlowManager:
             agent_name="TradingAgent",
             mistake="Entered BUY trade at local resistance level ($2680.00) without confluence.",
             correction="Confirm break-and-retest support on lower timeframes (1H/15M) before buying a high price.",
-            lesson="Buying at horizontal resistance reduces Risk/Reward profiles and leads to high-rate drawdown events."
+            lesson="Buying at horizontal resistance reduces Risk/Reward profiles and leads to high-rate drawdown events.",
         )
         logger.info("Default mock training lessons seeded in Agent registry.")

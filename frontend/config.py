@@ -15,8 +15,8 @@ _here = Path(__file__).resolve().parent
 
 # Try root .env first, then one level up, then system env
 for candidate in [
-    _here / ".env",           # same dir as config.py
-    _here.parent / ".env",    # one level up (if config.py is in frontend/)
+    _here / ".env",  # same dir as config.py
+    _here.parent / ".env",  # one level up (if config.py is in frontend/)
 ]:
     if candidate.exists():
         load_dotenv(candidate)

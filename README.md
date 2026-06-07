@@ -231,6 +231,38 @@ npm run dev
 
 ---
 
+## 🛡️ Pre-Push Cleanup & Optimization Hook
+
+The repository includes an automated pre-push Git hook that runs before every `git push` to guarantee code cleanliness, optimization, and production correctness.
+
+### What the Hook Does:
+1. **Cleanup**: Deletes root-level temporary files (like `test_out.txt`), scratch folders (`scratch/`), and python/javascript build and linting caches (e.g., `__pycache__`, `.ruff_cache`, `.pytest_cache`, etc.). It also removes custom temporary scratch files matching `scratch_*`, `temp_*`, etc.
+2. **Python Optimization**: Auto-formats Python files using `ruff format` and resolves auto-fixable warnings with `ruff check --fix`.
+3. **Frontend Minification & Build**: Validates Next.js frontend code using `npm run lint` and runs `npm run build` to compile, tree-shake, and minify frontend assets.
+
+If any check fails (e.g., Next.js build compilation error or unfixable Python lint error), the push is aborted.
+
+### Installation
+To install or re-install the pre-push hook, run the following command from the project root:
+```bash
+python scripts/pre_push_clean_opt.py --install
+```
+
+### Manual Trigger
+You can run the cleanup and optimization manually at any time by running:
+```bash
+python scripts/pre_push_clean_opt.py
+```
+
+### Bypassing the Hook
+If you need to push immediately without running the checks (e.g., when pushing to a draft/wip branch), bypass it using the `--no-verify` flag:
+```bash
+git push --no-verify
+```
+
+---
+
 ## 📝 Maintenance & Updates Rule
 > [!IMPORTANT]
 > **Maintain Documentation Integrity**: Whenever any modifications are made to the codebase (such as adding new agents, modifying task schemas, or adding new external API tools), this `README.md` file **must** be updated synchronously to reflect the modified features, workflow details, or architectural changes.
+

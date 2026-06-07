@@ -1,6 +1,5 @@
 import logging
 import requests
-from typing import Dict, Any, List
 from crewai.tools import tool
 from config import settings
 
@@ -9,10 +8,12 @@ logger = logging.getLogger("market_data_tools")
 # Optional yfinance import
 try:
     import yfinance as yf
+
     YFINANCE_AVAILABLE = True
 except ImportError:
     YFINANCE_AVAILABLE = False
     logger.warning("yfinance package not installed. Using raw requests/API fallbacks.")
+
 
 @tool("Gold Price Fetcher")
 def fetch_gold_price() -> str:
@@ -42,6 +43,7 @@ def fetch_gold_price() -> str:
     # Final hardcoded mock for offline/fail safety
     return "Gold (XAU/USD) Price: $2645.30 USD (Mock Spot Price)"
 
+
 @tool("Forex Pairs Price Fetcher")
 def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str:
     """
@@ -54,18 +56,22 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
     # Try Twelve Data
     if settings.TWELVE_DATA_API_KEY:
         try:
-            formatted_pairs = ",".join([f"{p[:3]}/{p[3:]}" for p in pair_list if len(p) == 6])
+            formatted_pairs = ",".join(
+                [f"{p[:3]}/{p[3:]}" for p in pair_list if len(p) == 6]
+            )
             url = f"https://api.twelvedata.com/price?symbol={formatted_pairs}&apikey={settings.TWELVE_DATA_API_KEY}"
             res = requests.get(url, timeout=10)
             data = res.json()
-            
+
             # Twelve data returns dict if single pair, list of dicts if multiple
             if isinstance(data, dict) and "price" in data:
                 return f"{pairs}: {data['price']} (via Twelve Data)"
             elif isinstance(data, dict):
                 for p_key, p_val in data.items():
                     if "price" in p_val:
-                        results.append(f"{p_key.replace('/', '')}: {float(p_val['price']):.4f}")
+                        results.append(
+                            f"{p_key.replace('/', '')}: {float(p_val['price']):.4f}"
+                        )
             if results:
                 return "Forex Rates: " + ", ".join(results) + " (via Twelve Data)"
         except Exception as e:
@@ -77,7 +83,7 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
         res = requests.get(url, timeout=10)
         data = res.json()
         rates = data.get("rates", {})
-        
+
         frankfurter_rates = []
         for pair in pair_list:
             if pair.startswith("USD") and len(pair) == 6:
@@ -89,9 +95,13 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
                 if base in rates:
                     rate = 1.0 / rates[base]
                     frankfurter_rates.append(f"{pair}: {rate:.4f}")
-                    
+
         if frankfurter_rates:
-            return "Forex Rates (Daily ECB): " + ", ".join(frankfurter_rates) + " (via Frankfurter API)"
+            return (
+                "Forex Rates (Daily ECB): "
+                + ", ".join(frankfurter_rates)
+                + " (via Frankfurter API)"
+            )
     except Exception as e:
         logger.error(f"Frankfurter forex fetch failed: {e}")
 
@@ -101,10 +111,11 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
         "USDJPY": "154.20",
         "GBPUSD": "1.2680",
         "USDCHF": "0.8920",
-        "AUDUSD": "0.6640"
+        "AUDUSD": "0.6640",
     }
     returned_mocks = [f"{p}: {mock_rates.get(p, '1.0000')}" for p in pair_list]
     return "Forex Rates: " + ", ".join(returned_mocks) + " (Mock Rates)"
+
 
 @tool("Commodities Price Fetcher")
 def fetch_commodities_prices() -> str:
@@ -117,7 +128,7 @@ def fetch_commodities_prices() -> str:
             "Silver (XAG/USD)": "SI=F",
             "WTI Crude Oil": "CL=F",
             "Brent Crude Oil": "BZ=F",
-            "Copper": "HG=F"
+            "Copper": "HG=F",
         }
         for name, ticker_sym in tickers.items():
             try:
@@ -130,8 +141,9 @@ def fetch_commodities_prices() -> str:
 
     if results:
         return "Commodity Prices: " + ", ".join(results) + " (via yfinance Futures)"
-        
+
     return "Commodity Prices: Silver (XAG/USD): $30.50, WTI Crude: $78.20, Brent Crude: $82.40, Copper: $4.15 (Mock Prices)"
+
 
 @tool("Crypto Price Fetcher")
 def fetch_crypto_prices() -> str:
@@ -169,6 +181,7 @@ def fetch_crypto_prices() -> str:
 
     return "Bitcoin (BTC/USD) Price: $67,450.00 USD (Mock Price)"
 
+
 @tool("Market Indices Fetcher")
 def fetch_market_indices() -> str:
     """Fetches the current value of the Dollar Index (DXY), S&P 500 Index, and volatility index (VIX)."""
@@ -178,7 +191,7 @@ def fetch_market_indices() -> str:
         tickers = {
             "US Dollar Index (DXY)": "DX-Y.NYB",
             "S&P 500 (^GSPC)": "^GSPC",
-            "CBOE Volatility Index (VIX)": "^VIX"
+            "CBOE Volatility Index (VIX)": "^VIX",
         }
         for name, ticker_sym in tickers.items():
             try:
@@ -193,6 +206,7 @@ def fetch_market_indices() -> str:
         return "Market Indices: " + ", ".join(results) + " (via yfinance)"
 
     return "Market Indices: US Dollar Index (DXY): 104.50, S&P 500: 5300.20, VIX: 13.50 (Mock Indices)"
+
 
 @tool("Treasury Yields Fetcher")
 def fetch_treasury_yields() -> str:

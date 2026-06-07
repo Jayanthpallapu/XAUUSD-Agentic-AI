@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 from crewai import Agent, Task, Crew, Process, LLM
 from config import settings
 from governance.audit.supabase_client import db_service
@@ -9,7 +9,7 @@ from api.schemas.models import (
     TradeSignal,
     QAReport,
     PerformanceReport,
-    SupervisorReport
+    SupervisorReport,
 )
 
 # Import tools using absolute project imports
@@ -19,40 +19,39 @@ from tools.definitions.market_data import (
     fetch_commodities_prices,
     fetch_crypto_prices,
     fetch_market_indices,
-    fetch_treasury_yields
+    fetch_treasury_yields,
 )
 from tools.definitions.news_calendar import (
     fetch_news_rss,
     analyze_news_sentiment,
-    fetch_economic_calendar
+    fetch_economic_calendar,
 )
 from tools.definitions.trading_performance import (
     execute_paper_trade,
     fetch_trade_performance,
-    record_teacher_feedback
+    record_teacher_feedback,
 )
 from tools.definitions.system import (
     check_agent_health,
     restart_agent_node,
-    send_telegram_notification
+    send_telegram_notification,
 )
 
 logger = logging.getLogger("crew_setup")
 
+
 def get_llm(model_name: str = "groq/llama-3.3-70b-versatile") -> LLM:
     if settings.GROQ_API_KEY:
         try:
-            return LLM(
-                model=model_name,
-                api_key=settings.GROQ_API_KEY,
-                temperature=0.2
-            )
+            return LLM(model=model_name, api_key=settings.GROQ_API_KEY, temperature=0.2)
         except Exception as e:
-            logger.error(f"Error creating LLM: {e}. Falling back to default system model.")
+            logger.error(
+                f"Error creating LLM: {e}. Falling back to default system model."
+            )
     return LLM(
-        model="groq/llama-3.1-8b-instant",
-        api_key="gsk_mock_key_for_offline_runs"
+        model="groq/llama-3.1-8b-instant", api_key="gsk_mock_key_for_offline_runs"
     )
+
 
 def fetch_lessons_backstory(agent_name: str) -> str:
     try:
@@ -63,11 +62,12 @@ def fetch_lessons_backstory(agent_name: str) -> str:
             if lessons and isinstance(lessons, list):
                 formatted = "\nCRITICAL LESSONS LEARNED FROM PAST MISTAKES (You MUST avoid repeating these):\n"
                 for idx, item in enumerate(lessons[-5:]):
-                    formatted += f"Lesson {idx+1}:\n- Past Mistake: {item.get('mistake')}\n- Corrective Action: {item.get('correction')}\n- Teacher Lesson: {item.get('lesson')}\n"
+                    formatted += f"Lesson {idx + 1}:\n- Past Mistake: {item.get('mistake')}\n- Corrective Action: {item.get('correction')}\n- Teacher Lesson: {item.get('lesson')}\n"
                 return formatted
     except Exception as e:
         logger.error(f"Error fetching lessons backstory for {agent_name}: {e}")
     return ""
+
 
 def create_correlation_agent(llm: LLM) -> Agent:
     lessons = fetch_lessons_backstory("CorrelationAgent")
@@ -81,18 +81,19 @@ def create_correlation_agent(llm: LLM) -> Agent:
             f"{lessons}"
         ),
         tools=[
-            fetch_forex_prices, 
-            fetch_commodities_prices, 
-            fetch_crypto_prices, 
-            fetch_market_indices, 
+            fetch_forex_prices,
+            fetch_commodities_prices,
+            fetch_crypto_prices,
+            fetch_market_indices,
             fetch_treasury_yields,
-            fetch_news_rss
+            fetch_news_rss,
         ],
         llm=llm,
         allow_delegation=False,
         max_iter=15,
-        verbose=True
+        verbose=True,
     )
+
 
 def create_news_agent(llm: LLM) -> Agent:
     lessons = fetch_lessons_backstory("NewsAgent")
@@ -108,13 +109,14 @@ def create_news_agent(llm: LLM) -> Agent:
             fetch_gold_price,
             fetch_news_rss,
             analyze_news_sentiment,
-            fetch_economic_calendar
+            fetch_economic_calendar,
         ],
         llm=llm,
         allow_delegation=False,
         max_iter=15,
-        verbose=True
+        verbose=True,
     )
+
 
 def create_trading_agent(llm: LLM) -> Agent:
     lessons = fetch_lessons_backstory("TradingAgent")
@@ -127,15 +129,13 @@ def create_trading_agent(llm: LLM) -> Agent:
             "Your trade rules require a risk/reward ratio of at least 1:1.5 and careful risk control based on a starting capital of $10,000 USD."
             f"{lessons}"
         ),
-        tools=[
-            fetch_gold_price,
-            execute_paper_trade
-        ],
+        tools=[fetch_gold_price, execute_paper_trade],
         llm=llm,
         allow_delegation=False,
         max_iter=15,
-        verbose=True
+        verbose=True,
     )
+
 
 def create_qa_agent(llm: LLM) -> Agent:
     lessons = fetch_lessons_backstory("QAAgent")
@@ -148,14 +148,13 @@ def create_qa_agent(llm: LLM) -> Agent:
             "and make logical sense given the news sentiment. You flag errors, adjust confidence levels, and list improvement suggestions."
             f"{lessons}"
         ),
-        tools=[
-            fetch_gold_price
-        ],
+        tools=[fetch_gold_price],
         llm=llm,
         allow_delegation=False,
         max_iter=15,
-        verbose=True
+        verbose=True,
     )
+
 
 def create_performance_agent(llm: LLM) -> Agent:
     lessons = fetch_lessons_backstory("PerformanceAgent")
@@ -167,14 +166,13 @@ def create_performance_agent(llm: LLM) -> Agent:
             "and overall portfolio health. You track the accuracy of signals over time and help identify which agents are making logical mistakes."
             f"{lessons}"
         ),
-        tools=[
-            fetch_trade_performance
-        ],
+        tools=[fetch_trade_performance],
         llm=llm,
         allow_delegation=False,
         max_iter=15,
-        verbose=True
+        verbose=True,
     )
+
 
 def create_supervisor_agent(llm: LLM) -> Agent:
     lessons = fetch_lessons_backstory("SupervisorAgent")
@@ -192,68 +190,75 @@ def create_supervisor_agent(llm: LLM) -> Agent:
             restart_agent_node,
             record_teacher_feedback,
             fetch_trade_performance,
-            send_telegram_notification
+            send_telegram_notification,
         ],
         llm=llm,
         allow_delegation=True,
         max_iter=15,
-        verbose=True
+        verbose=True,
     )
+
 
 def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     llm = get_llm()
-    
+
     corr_agent = create_correlation_agent(llm)
     news_agent = create_news_agent(llm)
     trade_agent = create_trading_agent(llm)
     qa_agent = create_qa_agent(llm)
     perf_agent = create_performance_agent(llm)
     supervisor_agent = create_supervisor_agent(llm)
-    
+
     corr_task = Task(
         description="Fetch forex prices, index prices, crypto rates, commodity rates, and treasury yields. Research how correlated markets are moving. Analyze recent correlated news RSS.",
         expected_output="A structured report evaluating correlation alignment metrics.",
         agent=corr_agent,
-        output_pydantic=CorrelationReport
+        output_pydantic=CorrelationReport,
     )
-    
+
     news_task = Task(
         description="Fetch gold spot price, search news RSS for gold market sentiment and economic calendar events. Summarize sentiment and note if any high-impact event (CPI, NFP, GDP, Interest rates) is released today.",
         expected_output="A structured gold news and economic event impact analysis.",
         agent=news_agent,
-        output_pydantic=GoldNewsReport
+        output_pydantic=GoldNewsReport,
     )
-    
+
     research_crew = Crew(
         agents=[corr_agent, news_agent],
         tasks=[corr_task, news_task],
         process=Process.sequential,
-        verbose=True
+        verbose=True,
     )
-    
+
     logger.info("Starting Research Crew kickoff...")
     research_results = research_crew.kickoff()
-    
+
     corr_output = research_results.tasks_output[0].pydantic
     news_output = research_results.tasks_output[1].pydantic
-    
-    db_service.insert("correlation_reports", {
-        "cycle_id": cycle_id,
-        "pair_correlations": [p.dict() for p in corr_output.pair_correlations],
-        "news_impacts": [n.dict() for n in corr_output.news_impacts],
-        "overall_confluence_score": corr_output.overall_confluence_score,
-        "summary": corr_output.summary
-    })
+
+    db_service.insert(
+        "correlation_reports",
+        {
+            "cycle_id": cycle_id,
+            "pair_correlations": [p.dict() for p in corr_output.pair_correlations],
+            "news_impacts": [n.dict() for n in corr_output.news_impacts],
+            "overall_confluence_score": corr_output.overall_confluence_score,
+            "summary": corr_output.summary,
+        },
+    )
     db_service.update_agent_status("CorrelationAgent", "active", tasks_delta=1)
 
-    db_service.insert("gold_news_reports", {
-        "cycle_id": cycle_id,
-        "news_items": [n.dict() for n in news_output.news_items],
-        "market_sentiment": news_output.market_sentiment,
-        "impact_on_pairs": [p.dict() for p in news_output.impact_on_pairs],
-        "is_high_impact": news_output.is_high_impact,
-        "summary": news_output.summary
-    })
+    db_service.insert(
+        "gold_news_reports",
+        {
+            "cycle_id": cycle_id,
+            "news_items": [n.dict() for n in news_output.news_items],
+            "market_sentiment": news_output.market_sentiment,
+            "impact_on_pairs": [p.dict() for p in news_output.impact_on_pairs],
+            "is_high_impact": news_output.is_high_impact,
+            "summary": news_output.summary,
+        },
+    )
     db_service.update_agent_status("NewsAgent", "active", tasks_delta=1)
 
     trade_task = Task(
@@ -265,9 +270,9 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
         ),
         expected_output="A structured BUY/SELL/HOLD trade signal recommendation.",
         agent=trade_agent,
-        output_pydantic=TradeSignal
+        output_pydantic=TradeSignal,
     )
-    
+
     qa_task = Task(
         description=(
             "Review the research findings, news analysis, and the resulting Trade Signal. "
@@ -277,69 +282,76 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
         ),
         expected_output="A detailed QA audit report approving, rejecting, or adjusting the signal.",
         agent=qa_agent,
-        output_pydantic=QAReport
+        output_pydantic=QAReport,
     )
-    
+
     analysis_crew = Crew(
         agents=[trade_agent, qa_agent],
         tasks=[trade_task, qa_task],
         process=Process.sequential,
-        verbose=True
+        verbose=True,
     )
-    
+
     logger.info("Starting Analysis Crew kickoff...")
     analysis_results = analysis_crew.kickoff()
-    
+
     trade_output = analysis_results.tasks_output[0].pydantic
     qa_output = analysis_results.tasks_output[1].pydantic
-    
-    db_service.insert("qa_reports", {
-        "cycle_id": cycle_id,
-        "issues_found": [i.dict() for i in qa_output.issues_found],
-        "improvements": [imp.dict() for imp in qa_output.improvements],
-        "approval_status": qa_output.approval_status,
-        "confidence_adjustment": qa_output.confidence_adjustment,
-        "summary": qa_output.summary
-    })
+
+    db_service.insert(
+        "qa_reports",
+        {
+            "cycle_id": cycle_id,
+            "issues_found": [i.dict() for i in qa_output.issues_found],
+            "improvements": [imp.dict() for imp in qa_output.improvements],
+            "approval_status": qa_output.approval_status,
+            "confidence_adjustment": qa_output.confidence_adjustment,
+            "summary": qa_output.summary,
+        },
+    )
     db_service.update_agent_status("TradingAgent", "active", tasks_delta=1)
     db_service.update_agent_status("QAAgent", "active", tasks_delta=1)
 
     if qa_output.approval_status == "rejected":
         signals = db_service.select("trade_signals", {"cycle_id": cycle_id})
         if signals:
-            db_service.update("trade_signals", {"id": signals[0]["id"]}, {"status": "expired"})
-            logger.info(f"QA Agent rejected trade signal. Trade ID {signals[0]['id'][:8]} marked as expired/rejected.")
+            db_service.update(
+                "trade_signals", {"id": signals[0]["id"]}, {"status": "expired"}
+            )
+            logger.info(
+                f"QA Agent rejected trade signal. Trade ID {signals[0]['id'][:8]} marked as expired/rejected."
+            )
 
     perf_task = Task(
         description="Analyze closed trade results using the Trade Performance Fetcher tool. Compile portfolio statistics (win rate, total PnL, drawdowns, Sharpe) and assess current agent performance scores.",
         expected_output="A compiled portfolio performance and accuracy scorecard.",
         agent=perf_agent,
-        output_pydantic=PerformanceReport
+        output_pydantic=PerformanceReport,
     )
-    
+
     perf_crew = Crew(
-        agents=[perf_agent],
-        tasks=[perf_task],
-        process=Process.sequential,
-        verbose=True
+        agents=[perf_agent], tasks=[perf_task], process=Process.sequential, verbose=True
     )
-    
+
     logger.info("Starting Performance Crew kickoff...")
     perf_results = perf_crew.kickoff()
     perf_output = perf_results.tasks_output[0].pydantic
-    
-    db_service.insert("performance_reports", {
-        "cycle_id": cycle_id,
-        "win_rate": perf_output.win_rate,
-        "total_pnl": perf_output.total_pnl,
-        "sharpe_ratio": perf_output.sharpe_ratio,
-        "max_drawdown": perf_output.max_drawdown,
-        "profit_factor": perf_output.profit_factor,
-        "total_trades": perf_output.total_trades,
-        "winning_trades": perf_output.winning_trades,
-        "losing_trades": perf_output.losing_trades,
-        "agent_scores": perf_output.agent_scores
-    })
+
+    db_service.insert(
+        "performance_reports",
+        {
+            "cycle_id": cycle_id,
+            "win_rate": perf_output.win_rate,
+            "total_pnl": perf_output.total_pnl,
+            "sharpe_ratio": perf_output.sharpe_ratio,
+            "max_drawdown": perf_output.max_drawdown,
+            "profit_factor": perf_output.profit_factor,
+            "total_trades": perf_output.total_trades,
+            "winning_trades": perf_output.winning_trades,
+            "losing_trades": perf_output.losing_trades,
+            "agent_scores": perf_output.agent_scores,
+        },
+    )
     db_service.update_agent_status("PerformanceAgent", "active", tasks_delta=1)
 
     supervisor_task = Task(
@@ -351,27 +363,30 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
         ),
         expected_output="A summary of supervisor actions taken and system health.",
         agent=supervisor_agent,
-        output_pydantic=SupervisorReport
+        output_pydantic=SupervisorReport,
     )
-    
+
     supervisor_crew = Crew(
         agents=[supervisor_agent],
         tasks=[supervisor_task],
         process=Process.sequential,
-        verbose=True
+        verbose=True,
     )
-    
+
     logger.info("Starting Supervisor Crew kickoff...")
     supervisor_results = supervisor_crew.kickoff()
     supervisor_output = supervisor_results.tasks_output[0].pydantic
-    
-    db_service.insert("supervisor_reports", {
-        "cycle_id": cycle_id,
-        "agent_statuses": [a.dict() for a in supervisor_output.agent_statuses],
-        "actions_taken": [a.dict() for a in supervisor_output.actions_taken],
-        "daily_summary": supervisor_output.daily_summary,
-        "telegram_sent": supervisor_output.telegram_sent
-    })
+
+    db_service.insert(
+        "supervisor_reports",
+        {
+            "cycle_id": cycle_id,
+            "agent_statuses": [a.dict() for a in supervisor_output.agent_statuses],
+            "actions_taken": [a.dict() for a in supervisor_output.actions_taken],
+            "daily_summary": supervisor_output.daily_summary,
+            "telegram_sent": supervisor_output.telegram_sent,
+        },
+    )
     db_service.update_agent_status("SupervisorAgent", "active", tasks_delta=1)
 
     return {
@@ -380,5 +395,5 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
         "trade": trade_output.dict(),
         "qa": qa_output.dict(),
         "performance": perf_output.dict(),
-        "supervisor": supervisor_output.dict()
+        "supervisor": supervisor_output.dict(),
     }

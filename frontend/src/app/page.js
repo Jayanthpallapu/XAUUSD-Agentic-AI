@@ -110,9 +110,14 @@ export default function Dashboard() {
 
   // Set currentTime only on client to avoid SSR hydration mismatch
   useEffect(() => {
-    setCurrentTime(new Date().toISOString());
+    const timeout = setTimeout(() => {
+      setCurrentTime(new Date().toISOString());
+    }, 0);
     const timer = setInterval(() => setCurrentTime(new Date().toISOString()), 60000);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(timer);
+    };
   }, []);
 
   // Mark unmounted on cleanup

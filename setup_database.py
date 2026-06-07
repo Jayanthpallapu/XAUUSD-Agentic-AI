@@ -4,6 +4,7 @@ import os
 
 SCHEMA_PATH = "supabase/schema.sql"
 
+
 def install_and_import(package):
     try:
         __import__(package)
@@ -11,6 +12,7 @@ def install_and_import(package):
     except ImportError:
         print(f"Installing {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
 
 if __name__ == "__main__":
     install_and_import("psycopg2")
@@ -32,14 +34,14 @@ if __name__ == "__main__":
             port=6543,
             user="postgres.rcotcanlwgysparkojgj",
             password="@+*KgFfyf9p-rX$",
-            database="postgres"
+            database="postgres",
         )
         conn.autocommit = True
         cursor = conn.cursor()
-        
+
         print("Executing schema setup SQL commands...")
         cursor.execute(sql_commands)
-        
+
         print("Database schema successfully seeded and configured!")
         cursor.close()
         conn.close()

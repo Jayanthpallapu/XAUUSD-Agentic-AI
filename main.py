@@ -2,9 +2,20 @@ import logging
 import asyncio
 import os
 import sys
+from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException, Request, Response, Depends, status
+from fastapi import (
+    FastAPI,
+    BackgroundTasks,
+    WebSocket,
+    WebSocketDisconnect,
+    HTTPException,
+    Request,
+    Response,
+    Depends,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
@@ -14,7 +25,9 @@ from governance.audit.supabase_client import db_service
 from orchestration.graph import FlowManager
 
 # Setup Logger
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger("api_server")
 
 # Global Agent execution control state
@@ -22,25 +35,28 @@ agent_active = False
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
+
     SCHEDULER_AVAILABLE = True
 except ImportError:
     SCHEDULER_AVAILABLE = False
-    logger.warning("APScheduler package not installed. Scheduled task execution disabled.")
+    logger.warning(
+        "APScheduler package not installed. Scheduled task execution disabled."
+    )
 
 # Optional starlette sse transport for MCP
 try:
     from mcp.server.sse import SseServerTransport
+
     MCP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
     logger.warning("mcp python package not installed. HTTP MCP endpoints disabled.")
 
-from contextlib import asynccontextmanager
 
 app = FastAPI(
     title="XAUUSD Agentic Company API",
     description="Enterprise Multi-Agent Gold Trading & Observability Dashboard",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Restrict CORS to the configured frontend URL only (never wildcard in production)
@@ -62,7 +78,11 @@ app.add_middleware(
 # 1. Security Authorization Dependencies (Supabase JWT/OAuth2 Verification)
 security_bearer = HTTPBearer(auto_error=False)
 
-async def verify_supabase_jwt(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)):
+
+async def verify_supabase_jwt(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
+):
     """Verifies standard bearer token signature or query token parameter against Supabase Auth API."""
     token = None
     if credentials:
@@ -75,11 +95,13 @@ async def verify_supabase_jwt(request: Request, credentials: Optional[HTTPAuthor
         # If no credentials exist, allow request in mock/development mode, but log warning.
         # In strict enterprise production mode, raise 401 Unauthorized.
         if not settings.is_supabase_configured:
-            logger.info("Anonymous access allowed on MCP endpoint (Development Mode - Supabase offline).")
+            logger.info(
+                "Anonymous access allowed on MCP endpoint (Development Mode - Supabase offline)."
+            )
             return "developer-bypass"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization token."
+            detail="Missing Authorization token.",
         )
 
     if not settings.is_supabase_configured:
@@ -90,26 +112,26 @@ async def verify_supabase_jwt(request: Request, credentials: Optional[HTTPAuthor
     # Call Supabase Auth endpoint to verify JWT
     try:
         url = f"{settings.SUPABASE_URL}/auth/v1/user"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "apikey": settings.SUPABASE_KEY
-        }
+        headers = {"Authorization": f"Bearer {token}", "apikey": settings.SUPABASE_KEY}
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
             user_data = res.json()
-            logger.info(f"Authenticated user: {user_data.get('email')} via Supabase JWT.")
+            logger.info(
+                f"Authenticated user: {user_data.get('email')} via Supabase JWT."
+            )
             return user_data
         else:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid Supabase Auth token signature: {res.text}"
+                detail=f"Invalid Supabase Auth token signature: {res.text}",
             )
     except Exception as e:
         logger.error(f"Supabase Auth server error: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication server unavailable."
+            detail="Authentication server unavailable.",
         )
+
 
 # 2. Connection Manager for Websockets Live Streams
 class ConnectionManager:
@@ -120,7 +142,9 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info(f"New WebSocket connection accepted. Total active: {len(self.active_connections)}")
+        logger.info(
+            f"New WebSocket connection accepted. Total active: {len(self.active_connections)}"
+        )
         if self.disconnect_task and not self.disconnect_task.done():
             self.disconnect_task.cancel()
             logger.info("Frontend reconnected. Auto-shutdown timer cancelled.")
@@ -128,8 +152,10 @@ class ConnectionManager:
     async def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-        logger.info(f"WebSocket disconnected. Remaining: {len(self.active_connections)}")
-        
+        logger.info(
+            f"WebSocket disconnected. Remaining: {len(self.active_connections)}"
+        )
+
         global agent_active
         if len(self.active_connections) == 0 and agent_active:
             self.start_shutdown_timer()
@@ -140,21 +166,30 @@ class ConnectionManager:
 
         async def shutdown_timer():
             try:
-                logger.info("No active connections. Starting 15-minute auto-shutdown countdown...")
+                logger.info(
+                    "No active connections. Starting 15-minute auto-shutdown countdown..."
+                )
                 await asyncio.sleep(900)  # 15 minutes
                 global agent_active
                 if len(self.active_connections) == 0 and agent_active:
                     agent_active = False
-                    logger.info("Auto-shutdown: No frontend connection detected for 15 minutes. Agent stopped.")
+                    logger.info(
+                        "Auto-shutdown: No frontend connection detected for 15 minutes. Agent stopped."
+                    )
                     try:
-                        db_service.insert("audit_log", {
-                            "agent_name": "SupervisorAgent",
-                            "action": "AUTO_SHUTDOWN",
-                            "status": "success",
-                            "error_message": "Agent execution automatically stopped due to frontend inactivity (15 mins)."
-                        })
+                        db_service.insert(
+                            "audit_log",
+                            {
+                                "agent_name": "SupervisorAgent",
+                                "action": "AUTO_SHUTDOWN",
+                                "status": "success",
+                                "error_message": "Agent execution automatically stopped due to frontend inactivity (15 mins).",
+                            },
+                        )
                     except Exception as db_err:
-                        logger.error(f"Failed to insert audit log on auto-shutdown: {db_err}")
+                        logger.error(
+                            f"Failed to insert audit log on auto-shutdown: {db_err}"
+                        )
             except asyncio.CancelledError:
                 logger.info("Auto-shutdown timer cancelled.")
             except Exception as e:
@@ -167,7 +202,9 @@ class ConnectionManager:
             if loop.is_running():
                 self.disconnect_task = loop.create_task(shutdown_timer())
             else:
-                logger.warning("Could not start auto-shutdown timer: no running event loop found.")
+                logger.warning(
+                    "Could not start auto-shutdown timer: no running event loop found."
+                )
 
     async def broadcast(self, message: Dict[str, Any]):
         for connection in self.active_connections:
@@ -176,7 +213,9 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Error broadcasting WebSocket message: {e}")
 
+
 ws_manager = ConnectionManager()
+
 
 # 3. Live Logs Streaming Websockets Handler
 class WebSocketLogHandler(logging.Handler):
@@ -197,46 +236,63 @@ class WebSocketLogHandler(logging.Handler):
             "type": "log",
             "timestamp": datetime.utcnow().isoformat(),
             "level": record.levelname,
-            "message": log_entry
+            "message": log_entry,
         }
         if ws_manager.active_connections:
             loop = self._get_loop()
             if loop and loop.is_running():
                 try:
-                    asyncio.run_coroutine_threadsafe(ws_manager.broadcast(message), loop)
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.broadcast(message), loop
+                    )
                 except Exception:
                     pass
+
 
 ws_log_handler = WebSocketLogHandler()
 ws_log_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
 logging.getLogger().addHandler(ws_log_handler)
 
+
 def run_cycle_background(cycle_id: str = "") -> Dict[str, Any]:
     try:
-        asyncio.run(ws_manager.broadcast({
-            "type": "status",
-            "event": "cycle_started",
-            "timestamp": datetime.utcnow().isoformat()
-        }))
-        
+        asyncio.run(
+            ws_manager.broadcast(
+                {
+                    "type": "status",
+                    "event": "cycle_started",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+        )
+
         results = FlowManager.run_cycle()
-        
-        asyncio.run(ws_manager.broadcast({
-            "type": "status",
-            "event": "cycle_completed",
-            "timestamp": datetime.utcnow().isoformat(),
-            "results": results
-        }))
+
+        asyncio.run(
+            ws_manager.broadcast(
+                {
+                    "type": "status",
+                    "event": "cycle_completed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "results": results,
+                }
+            )
+        )
         return results
     except Exception as e:
         logger.error(f"Error in background cycle: {e}")
-        asyncio.run(ws_manager.broadcast({
-            "type": "status",
-            "event": "cycle_failed",
-            "timestamp": datetime.utcnow().isoformat(),
-            "error": str(e)
-        }))
+        asyncio.run(
+            ws_manager.broadcast(
+                {
+                    "type": "status",
+                    "event": "cycle_failed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "error": str(e),
+                }
+            )
+        )
         return {}
+
 
 def scheduled_job():
     global agent_active
@@ -250,6 +306,7 @@ def scheduled_job():
     else:
         logger.info("Skipping scheduled cycle. XAUUSD market is closed (Weekend).")
 
+
 # 4. Standard Dashboard API Routes
 @app.get("/")
 def read_root():
@@ -258,8 +315,9 @@ def read_root():
         "market": "XAUUSD",
         "time_utc": datetime.utcnow().isoformat(),
         "supabase_configured": settings.is_supabase_configured,
-        "telegram_configured": settings.is_telegram_configured
+        "telegram_configured": settings.is_telegram_configured,
     }
+
 
 @app.get("/api/dashboard")
 def get_dashboard():
@@ -267,22 +325,30 @@ def get_dashboard():
     trades = db_service.select("trade_signals")
     cycles = db_service.select("analysis_cycles")
     notifications = db_service.select("notifications")
-    
+
     correlation = db_service.select("correlation_reports")
     news = db_service.select("gold_news_reports")
     performance = db_service.select("performance_reports")
     supervisor = db_service.select("supervisor_reports")
 
-    latest_correlation = max(correlation, key=lambda x: x.get("created_at", ""), default=None)
+    latest_correlation = max(
+        correlation, key=lambda x: x.get("created_at", ""), default=None
+    )
     latest_news = max(news, key=lambda x: x.get("created_at", ""), default=None)
-    latest_performance = max(performance, key=lambda x: x.get("created_at", ""), default=None)
-    latest_supervisor = max(supervisor, key=lambda x: x.get("created_at", ""), default=None)
+    latest_performance = max(
+        performance, key=lambda x: x.get("created_at", ""), default=None
+    )
+    latest_supervisor = max(
+        supervisor, key=lambda x: x.get("created_at", ""), default=None
+    )
 
     active_positions = [t for t in trades if t.get("status") == "active"]
-    closed_trades = [t for t in trades if t.get("status") in ["closed_win", "closed_loss"]]
+    closed_trades = [
+        t for t in trades if t.get("status") in ["closed_win", "closed_loss"]
+    ]
     win_rate = 0.0
     total_pnl = 0.0
-    
+
     if latest_performance:
         win_rate = latest_performance.get("win_rate", 0.0)
         total_pnl = latest_performance.get("total_pnl", 0.0)
@@ -295,7 +361,9 @@ def get_dashboard():
     if latest_correlation:
         confluence_score = latest_correlation.get("overall_confluence_score", 50.0)
 
-    sorted_notifs = sorted(notifications, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+    sorted_notifs = sorted(
+        notifications, key=lambda x: x.get("created_at", ""), reverse=True
+    )[:10]
 
     return {
         "agents": agents,
@@ -304,29 +372,33 @@ def get_dashboard():
             "total_pnl": total_pnl,
             "active_positions_count": len(active_positions),
             "total_cycles_count": len(cycles),
-            "confluence_score": confluence_score
+            "confluence_score": confluence_score,
         },
         "active_trades": active_positions,
         "latest_correlation": latest_correlation,
         "latest_news": latest_news,
         "latest_performance": latest_performance,
         "latest_supervisor": latest_supervisor,
-        "notifications": sorted_notifs
+        "notifications": sorted_notifs,
     }
+
 
 @app.get("/api/trades")
 def get_trades():
     trades = db_service.select("trade_signals")
     return sorted(trades, key=lambda x: x.get("created_at", ""), reverse=True)
 
+
 @app.get("/api/news")
 def get_news():
     news_reports = db_service.select("gold_news_reports")
     return sorted(news_reports, key=lambda x: x.get("created_at", ""), reverse=True)
 
+
 @app.get("/api/debug-cycles")
 def debug_cycles():
     return db_service.select("analysis_cycles")
+
 
 @app.get("/api/debug-audit")
 def debug_audit():
@@ -339,8 +411,10 @@ def get_agent_status():
     return {
         "agent_active": agent_active,
         "active_connections": len(ws_manager.active_connections),
-        "shutdown_timer_running": ws_manager.disconnect_task is not None and not ws_manager.disconnect_task.done()
+        "shutdown_timer_running": ws_manager.disconnect_task is not None
+        and not ws_manager.disconnect_task.done(),
     }
+
 
 @app.post("/api/agent/start")
 def start_agent():
@@ -348,15 +422,19 @@ def start_agent():
     agent_active = True
     logger.info("Agent execution manually activated.")
     try:
-        db_service.insert("audit_log", {
-            "agent_name": "SupervisorAgent",
-            "action": "AGENT_START",
-            "status": "success",
-            "error_message": "Agent execution manually started from dashboard."
-        })
+        db_service.insert(
+            "audit_log",
+            {
+                "agent_name": "SupervisorAgent",
+                "action": "AGENT_START",
+                "status": "success",
+                "error_message": "Agent execution manually started from dashboard.",
+            },
+        )
     except Exception as db_err:
         logger.error(f"Failed to insert audit log on start_agent: {db_err}")
     return {"status": "started", "agent_active": True}
+
 
 @app.post("/api/agent/stop")
 def stop_agent():
@@ -364,15 +442,19 @@ def stop_agent():
     agent_active = False
     logger.info("Agent execution manually deactivated.")
     try:
-        db_service.insert("audit_log", {
-            "agent_name": "SupervisorAgent",
-            "action": "AGENT_STOP",
-            "status": "success",
-            "error_message": "Agent execution manually stopped from dashboard."
-        })
+        db_service.insert(
+            "audit_log",
+            {
+                "agent_name": "SupervisorAgent",
+                "action": "AGENT_STOP",
+                "status": "success",
+                "error_message": "Agent execution manually stopped from dashboard.",
+            },
+        )
     except Exception as db_err:
         logger.error(f"Failed to insert audit log on stop_agent: {db_err}")
     return {"status": "stopped", "agent_active": False}
+
 
 @app.post("/api/trigger-cycle")
 def trigger_cycle(background_tasks: BackgroundTasks):
@@ -380,13 +462,14 @@ def trigger_cycle(background_tasks: BackgroundTasks):
     if not agent_active:
         raise HTTPException(
             status_code=400,
-            detail="Cannot trigger cycle when Agent is inactive. Please start the agent first."
+            detail="Cannot trigger cycle when Agent is inactive. Please start the agent first.",
         )
     background_tasks.add_task(run_cycle_background)
     return {
         "status": "triggered",
-        "message": "Manual market analysis cycle dispatched to background task queue."
+        "message": "Manual market analysis cycle dispatched to background task queue.",
     }
+
 
 @app.post("/api/agents/{name}/restart")
 def restart_agent(name: str):
@@ -394,17 +477,22 @@ def restart_agent(name: str):
     agents = db_service.select("agent_registry", filters)
     if not agents:
         raise HTTPException(status_code=404, detail="Agent registry node not found.")
-        
-    db_service.update("agent_registry", filters, {
-        "status": "active",
-        "total_errors": 0,
-        "last_heartbeat": datetime.utcnow().isoformat()
-    })
-    
+
+    db_service.update(
+        "agent_registry",
+        filters,
+        {
+            "status": "active",
+            "total_errors": 0,
+            "last_heartbeat": datetime.utcnow().isoformat(),
+        },
+    )
+
     return {
         "status": "success",
-        "message": f"Agent node '{name}' manually restarted and errors reset."
+        "message": f"Agent node '{name}' manually restarted and errors reset.",
     }
+
 
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
@@ -418,6 +506,7 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket exception: {e}")
         await ws_manager.disconnect(websocket)
 
+
 # 5. Model Context Protocol (MCP) Server SSE Transport Endpoints
 if MCP_AVAILABLE:
     mcp_sse = SseServerTransport("/mcp/messages")
@@ -427,7 +516,7 @@ if MCP_AVAILABLE:
         """HTTP event stream connection endpoint for MCP clients."""
         logger.info("Initializing MCP SSE connection session...")
         from tools.registry import mcp
-        
+
         async with mcp_sse.connect_sse(
             request.scope, request.receive, request._send
         ) as (read_stream, write_stream):
@@ -435,7 +524,7 @@ if MCP_AVAILABLE:
             await mcp._mcp_server.run(
                 read_stream,
                 write_stream,
-                mcp._mcp_server.create_initialization_options()
+                mcp._mcp_server.create_initialization_options(),
             )
         return Response()
 
@@ -443,6 +532,7 @@ if MCP_AVAILABLE:
     async def handle_mcp_messages(request: Request):
         """JSON-RPC message transport endpoint for MCP client writes."""
         await mcp_sse.handle_post_message(request.scope, request.receive, request._send)
+
 
 # 6. Service Lifecycles (lifespan replaces deprecated @app.on_event)
 @asynccontextmanager
@@ -454,10 +544,12 @@ async def lifespan(app):
             scheduled_job,
             "interval",
             minutes=settings.RUN_INTERVAL_MINUTES,
-            id="market_analysis_cycle"
+            id="market_analysis_cycle",
         )
         scheduler.start()
-        logger.info(f"APScheduler initialized. Configured to run every {settings.RUN_INTERVAL_MINUTES} minutes (Monday to Friday only).")
+        logger.info(
+            f"APScheduler initialized. Configured to run every {settings.RUN_INTERVAL_MINUTES} minutes (Monday to Friday only)."
+        )
     yield
     # Shutdown (add cleanup here if needed)
     if SCHEDULER_AVAILABLE:
@@ -467,6 +559,7 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Error shutting down APScheduler: {e}")
 
+
 app.router.lifespan_context = lifespan
 
 # 7. Subprocess standard I/O launch options (for Cursor / Claude Desktop configs)
@@ -474,6 +567,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         logger.info("Launching Toolset as local Stdin/Stdout MCP Server Subprocess...")
         from tools.registry import mcp
+
         mcp.run()
         sys.exit(0)
 
