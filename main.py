@@ -17,6 +17,9 @@ from orchestration.graph import FlowManager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("api_server")
 
+# Global Agent execution control state
+agent_active = False
+
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     SCHEDULER_AVAILABLE = True
@@ -41,9 +44,10 @@ app = FastAPI(
 )
 
 # Restrict CORS to the configured frontend URL only (never wildcard in production)
+_default_origins = "http://localhost:3000,https://xauusd-agentic-ai.vercel.app,https://xauusd-agentic-ai-6g3p.vercel.app"
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.environ.get("FRONTEND_URL", "http://localhost:3000").split(",")
+    for origin in os.environ.get("FRONTEND_URL", _default_origins).split(",")
     if origin.strip()
 ]
 
@@ -111,15 +115,59 @@ async def verify_supabase_jwt(request: Request, credentials: Optional[HTTPAuthor
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.disconnect_task: Optional[asyncio.Task] = None
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
         logger.info(f"New WebSocket connection accepted. Total active: {len(self.active_connections)}")
+        if self.disconnect_task and not self.disconnect_task.done():
+            self.disconnect_task.cancel()
+            logger.info("Frontend reconnected. Auto-shutdown timer cancelled.")
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+    async def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
         logger.info(f"WebSocket disconnected. Remaining: {len(self.active_connections)}")
+        
+        global agent_active
+        if len(self.active_connections) == 0 and agent_active:
+            self.start_shutdown_timer()
+
+    def start_shutdown_timer(self):
+        if self.disconnect_task and not self.disconnect_task.done():
+            self.disconnect_task.cancel()
+
+        async def shutdown_timer():
+            try:
+                logger.info("No active connections. Starting 15-minute auto-shutdown countdown...")
+                await asyncio.sleep(900)  # 15 minutes
+                global agent_active
+                if len(self.active_connections) == 0 and agent_active:
+                    agent_active = False
+                    logger.info("Auto-shutdown: No frontend connection detected for 15 minutes. Agent stopped.")
+                    try:
+                        db_service.insert("audit_log", {
+                            "agent_name": "SupervisorAgent",
+                            "action": "AUTO_SHUTDOWN",
+                            "status": "success",
+                            "error_message": "Agent execution automatically stopped due to frontend inactivity (15 mins)."
+                        })
+                    except Exception as db_err:
+                        logger.error(f"Failed to insert audit log on auto-shutdown: {db_err}")
+            except asyncio.CancelledError:
+                logger.info("Auto-shutdown timer cancelled.")
+            except Exception as e:
+                logger.error(f"Error in auto-shutdown timer: {e}")
+
+        try:
+            self.disconnect_task = asyncio.create_task(shutdown_timer())
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                self.disconnect_task = loop.create_task(shutdown_timer())
+            else:
+                logger.warning("Could not start auto-shutdown timer: no running event loop found.")
 
     async def broadcast(self, message: Dict[str, Any]):
         for connection in self.active_connections:
@@ -191,6 +239,10 @@ def run_cycle_background(cycle_id: str = "") -> Dict[str, Any]:
         return {}
 
 def scheduled_job():
+    global agent_active
+    if not agent_active:
+        logger.info("Scheduled cycle skipped: Agent is inactive.")
+        return
     now = datetime.utcnow()
     if now.weekday() in [0, 1, 2, 3, 4]:
         logger.info("Executing scheduled XAUUSD analysis cycle...")
@@ -281,8 +333,55 @@ def debug_audit():
     return db_service.select("audit_log")
 
 
+@app.get("/api/agent/status")
+def get_agent_status():
+    global agent_active
+    return {
+        "agent_active": agent_active,
+        "active_connections": len(ws_manager.active_connections),
+        "shutdown_timer_running": ws_manager.disconnect_task is not None and not ws_manager.disconnect_task.done()
+    }
+
+@app.post("/api/agent/start")
+def start_agent():
+    global agent_active
+    agent_active = True
+    logger.info("Agent execution manually activated.")
+    try:
+        db_service.insert("audit_log", {
+            "agent_name": "SupervisorAgent",
+            "action": "AGENT_START",
+            "status": "success",
+            "error_message": "Agent execution manually started from dashboard."
+        })
+    except Exception as db_err:
+        logger.error(f"Failed to insert audit log on start_agent: {db_err}")
+    return {"status": "started", "agent_active": True}
+
+@app.post("/api/agent/stop")
+def stop_agent():
+    global agent_active
+    agent_active = False
+    logger.info("Agent execution manually deactivated.")
+    try:
+        db_service.insert("audit_log", {
+            "agent_name": "SupervisorAgent",
+            "action": "AGENT_STOP",
+            "status": "success",
+            "error_message": "Agent execution manually stopped from dashboard."
+        })
+    except Exception as db_err:
+        logger.error(f"Failed to insert audit log on stop_agent: {db_err}")
+    return {"status": "stopped", "agent_active": False}
+
 @app.post("/api/trigger-cycle")
 def trigger_cycle(background_tasks: BackgroundTasks):
+    global agent_active
+    if not agent_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot trigger cycle when Agent is inactive. Please start the agent first."
+        )
     background_tasks.add_task(run_cycle_background)
     return {
         "status": "triggered",
@@ -314,10 +413,10 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)
     except Exception as e:
         logger.error(f"WebSocket exception: {e}")
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)
 
 # 5. Model Context Protocol (MCP) Server SSE Transport Endpoints
 if MCP_AVAILABLE:
@@ -361,6 +460,12 @@ async def lifespan(app):
         logger.info(f"APScheduler initialized. Configured to run every {settings.RUN_INTERVAL_MINUTES} minutes (Monday to Friday only).")
     yield
     # Shutdown (add cleanup here if needed)
+    if SCHEDULER_AVAILABLE:
+        try:
+            scheduler.shutdown(wait=False)
+            logger.info("APScheduler shut down successfully.")
+        except Exception as e:
+            logger.warning(f"Error shutting down APScheduler: {e}")
 
 app.router.lifespan_context = lifespan
 

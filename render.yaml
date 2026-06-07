@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: XAUUSD-Agentic-AI
+    runtime: python
+    repo: https://github.com/Jayanthpallapu/XAUUSD-Agentic-AI
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FRONTEND_URL
+        value: https://xauusd-agentic-ai.vercel.app,https://xauusd-agentic-ai-6g3p.vercel.app
+      - key: PYTHON_VERSION
+        value: "3.11"

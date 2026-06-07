@@ -104,6 +104,7 @@ export default function Dashboard() {
   const [wsStatus, setWsStatus] = useState("offline");
   const [backendOnline, setBackendOnline] = useState(true);
   const [currentTime, setCurrentTime] = useState(null);
+  const [agentActive, setAgentActive] = useState(false);
   const logsEndRef = useRef(null);
   const isMounted = useRef(true);
 
@@ -138,12 +139,16 @@ export default function Dashboard() {
 
   // API integration: polling & websocket
   useEffect(() => {
-    // 1. Fetch dashboard data
-    const fetchDashboard = async () => {
+    // 1. Fetch dashboard data & agent status
+    const fetchDashboardAndStatus = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/dashboard`);
-        if (res.ok) {
-          const apiData = await res.json();
+        const [dashRes, statusRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/dashboard`),
+          fetch(`${API_BASE_URL}/api/agent/status`)
+        ]);
+
+        if (dashRes.ok) {
+          const apiData = await dashRes.json();
           if (isMounted.current) {
             setData(apiData);
             setBackendOnline(true);
@@ -151,14 +156,21 @@ export default function Dashboard() {
         } else {
           if (isMounted.current) setBackendOnline(false);
         }
+
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (isMounted.current) {
+            setAgentActive(statusData.agent_active);
+          }
+        }
       } catch (err) {
         if (isMounted.current) setBackendOnline(false);
         console.log("Could not connect to FastAPI server. Displaying high-fidelity mock data.");
       }
     };
 
-    fetchDashboard();
-    const pollInterval = setInterval(fetchDashboard, 15000);
+    fetchDashboardAndStatus();
+    const pollInterval = setInterval(fetchDashboardAndStatus, 15000);
 
     // 2. Connect WebSocket for live logs
     let ws;
@@ -180,7 +192,7 @@ export default function Dashboard() {
           if (msg.type === "log") {
             setLogs(prev => [...prev.slice(-99), msg.message]);
           } else if (msg.type === "status") {
-            fetchDashboard();
+            fetchDashboardAndStatus();
           }
         } catch (e) {
           setLogs(prev => [...prev.slice(-99), `Raw Message: ${event.data}`]);
@@ -209,6 +221,44 @@ export default function Dashboard() {
     };
   }, []);
 
+  const startAgent = async () => {
+    setLogs(prev => [...prev, "System: Dispatching manual agent start request..."]);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/agent/start`, { method: "POST" });
+      if (res.ok) {
+        setAgentActive(true);
+        setLogs(prev => [...prev, "System: Agent execution started. Scheduled cycles active."]);
+        return true;
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Start request failed.");
+      }
+    } catch (err) {
+      setAgentActive(true);
+      setLogs(prev => [...prev, `System [Demo Mode]: Starting Agent... Agent execution active.`]);
+      return true;
+    }
+  };
+
+  const stopAgent = async () => {
+    setLogs(prev => [...prev, "System: Dispatching manual agent stop request..."]);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/agent/stop`, { method: "POST" });
+      if (res.ok) {
+        setAgentActive(false);
+        setLogs(prev => [...prev, "System: Agent execution stopped. Scheduled cycles deactivated."]);
+        return true;
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Stop request failed.");
+      }
+    } catch (err) {
+      setAgentActive(false);
+      setLogs(prev => [...prev, "System [Demo Mode]: Stopping Agent... Agent execution deactivated."]);
+      return true;
+    }
+  };
+
   const triggerCycle = async () => {
     setLoading(true);
     setLogs(prev => [...prev, "System: Dispatching manual analysis cycle request..."]);
@@ -216,6 +266,7 @@ export default function Dashboard() {
       const res = await fetch(`${API_BASE_URL}/api/trigger-cycle`, { method: "POST" });
       if (res.ok) {
         setLogs(prev => [...prev, "System: Manual cycle successfully dispatched to FastAPI background task queue."]);
+        return true;
       } else {
         throw new Error("Trigger request failed.");
       }
@@ -229,8 +280,22 @@ export default function Dashboard() {
         "QAAgent: Audited signal. Approved.",
         "SupervisorAgent: Cycle complete. Telegram notification dispatched."
       ]);
+      return true;
+    } finally {
+      setTimeout(() => setLoading(false), 2000);
     }
-    setTimeout(() => setLoading(false), 2000);
+  };
+
+  const handleToggle = async () => {
+    if (agentActive) {
+      await stopAgent();
+    } else {
+      const started = await startAgent();
+      if (started) {
+        // Trigger a cycle immediately as part of starting working
+        await triggerCycle();
+      }
+    }
   };
 
   const restartAgent = async (name) => {
@@ -336,18 +401,46 @@ export default function Dashboard() {
         <header className="h-16 border-b border-slate-800 flex items-center justify-between px-8 bg-[#10121d] shrink-0">
           <div className="flex items-center gap-4">
             <span className="text-slate-400 text-xs font-mono uppercase tracking-widest">{activeTab} panel</span>
+            <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold font-mono tracking-wider transition-all ${agentActive ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-slate-800 text-slate-400 border border-slate-700"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${agentActive ? "bg-green-400 animate-pulse" : "bg-slate-500"}`}></span>
+              AGENT: {agentActive ? "RUNNING" : "INACTIVE"}
+            </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              id="btn-trigger-cycle"
-              onClick={triggerCycle}
-              disabled={loading}
-              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-slate-900 text-xs font-extrabold px-4 py-2 rounded-lg transition-all shadow-lg shadow-amber-500/10 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              {loading ? "PROCESSING..." : "TRIGGER ANALYSIS CYCLE"}
-            </button>
+          <div className="flex items-center gap-4">
+            {loading && (
+              <span className="flex items-center gap-1.5 text-[10px] font-bold font-mono text-amber-400 animate-pulse bg-amber-500/10 px-2.5 py-1.5 rounded-lg border border-amber-500/20">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                CYCLE RUNNING
+              </span>
+            )}
+
+            <div className="flex items-center gap-3 bg-[#161927] border border-slate-800 rounded-xl px-4 py-2 shadow-inner">
+              <span className="text-[10px] font-bold font-mono tracking-wider text-slate-400 uppercase">
+                SYSTEM EXECUTION:
+              </span>
+              <button
+                id="btn-agent-toggle"
+                onClick={handleToggle}
+                disabled={loading}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-all duration-300 ease-in-out focus:outline-none ${
+                  agentActive 
+                    ? 'bg-gradient-to-r from-emerald-500 to-green-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]' 
+                    : 'bg-slate-700'
+                } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title={agentActive ? "Deactivate the full system of agents" : "Activate full system of agents and trigger analysis cycle"}
+              >
+                <span className="sr-only">Toggle Agent System</span>
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-slate-950 shadow-md ring-0 transition duration-300 ease-in-out ${
+                    agentActive ? 'translate-x-5 bg-white' : 'translate-x-0 bg-slate-300'
+                  }`}
+                />
+              </button>
+              <span className={`text-xs font-mono font-extrabold uppercase tracking-wide transition-colors duration-300 ${agentActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
+                {agentActive ? 'ON' : 'OFF'}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -409,8 +502,9 @@ export default function Dashboard() {
                   <div className="mt-2 flex items-baseline gap-2">
                     <span className="text-2xl font-bold font-mono tracking-tight text-cyan-400">{data.metrics.total_cycles_count}</span>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-2 font-mono">
-                    24/5 Automated CRON scheduler online
+                  <div className="text-[10px] text-slate-400 mt-2 font-mono flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${agentActive ? "bg-green-400 animate-pulse" : "bg-slate-500"}`}></span>
+                    Scheduler: {agentActive ? "Active & Running" : "Stopped/Inactive"}
                   </div>
                 </div>
 
@@ -486,7 +580,7 @@ export default function Dashboard() {
 
                     {data.active_trades.length === 0 ? (
                       <div className="py-12 text-center text-xs text-slate-500 font-mono">
-                        No active simulated positions currently. Trigger cycle to scan.
+                        No active simulated positions currently. Turn System Execution ON to scan.
                       </div>
                     ) : (
                       data.active_trades.map((trade, i) => {
