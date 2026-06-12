@@ -82,7 +82,33 @@ def scrape_kitco_news() -> str:
     if not BS4_AVAILABLE:
         return "BeautifulSoup4 not installed. Cannot scrape Kitco news."
 
-    url = "https://www.kitco.com/news/gold/"
+    # Try Kitco RSS feed first (most reliable)
+    try:
+        import feedparser
+
+        rss_url = "https://www.kitco.com/rss/kitco-news.rss"
+        feed = feedparser.parse(rss_url)
+        if feed.entries:
+            articles = []
+            for entry in feed.entries[:8]:
+                title = entry.get("title", "")
+                pub = entry.get("published", "Recent")[:16]
+                lower = title.lower()
+                bullish = any(
+                    w in lower for w in ["rise", "surge", "gain", "rally", "high", "buy", "bullish"]
+                )
+                bearish = any(
+                    w in lower for w in ["fall", "drop", "plunge", "bear", "sell", "low", "loss"]
+                )
+                sentiment = (
+                    "Bullish" if bullish and not bearish else "Bearish" if bearish and not bullish else "Neutral"
+                )
+                articles.append(f"• [{sentiment}] {title} ({pub})")
+            return "📰 Kitco Gold News (Live RSS):\n\n" + "\n".join(articles) + "\n\nSource: kitco.com"
+    except Exception as rss_err:
+        logger.warning(f"Kitco RSS failed: {rss_err}. Trying web scrape...")
+
+    url = "https://www.kitco.com/news/"
     html = _get_html(url)
 
     if not html:
