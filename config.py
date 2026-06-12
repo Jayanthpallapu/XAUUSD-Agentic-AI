@@ -58,8 +58,10 @@ class Settings:
         """True if OpenRouter API key is set and not a placeholder."""
         if not self.OPENROUTER_API_KEY:
             return False
-        placeholders = ["placeholder", "your_openrouter", "sk-or-"]
-        return not any(p in self.OPENROUTER_API_KEY.lower() for p in ["placeholder", "your_openrouter"])
+        return not any(
+            p in self.OPENROUTER_API_KEY.lower()
+            for p in ["placeholder", "your_openrouter"]
+        )
 
 
 settings = Settings()

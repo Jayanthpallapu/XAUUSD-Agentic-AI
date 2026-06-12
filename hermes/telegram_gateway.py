@@ -106,9 +106,10 @@ def build_status_message(agent_active: bool, active_connections: int) -> str:
     total_lessons = mem_stats.get("total_lessons", 0)
     lessons_by_agent = mem_stats.get("lessons_by_agent", {})
 
-    lesson_lines = "\n".join(
-        [f"  • {name}: {count}" for name, count in lessons_by_agent.items()]
-    ) or "  • No lessons yet"
+    lesson_lines = (
+        "\n".join([f"  • {name}: {count}" for name, count in lessons_by_agent.items()])
+        or "  • No lessons yet"
+    )
 
     return (
         f"<b>🤖 XAUUSD Agentic Company — System Status</b>\n"
@@ -203,7 +204,7 @@ def build_memory_message() -> str:
         "━━━━━━━━━━━━━━━━━━━━━━━",
         f"📚 <b>Total Lessons Stored:</b> {total}",
         f"🔭 <b>Cycle Observations:</b> {total_obs}",
-        "\n<b>Lessons by Agent:</b>"
+        "\n<b>Lessons by Agent:</b>",
     ]
     for agent, count in by_agent.items():
         lines.append(f"  • {agent}: {count} lesson(s)")
@@ -266,7 +267,9 @@ async def process_telegram_update(
         # Security: only respond to configured chat
         allowed_chat = str(settings.TELEGRAM_CHAT_ID)
         if chat_id != allowed_chat:
-            logger.warning(f"Rejected Telegram update from unauthorized chat: {chat_id}")
+            logger.warning(
+                f"Rejected Telegram update from unauthorized chat: {chat_id}"
+            )
             return
 
         logger.info(f"Telegram command received: '{text}' from chat {chat_id}")
@@ -276,24 +279,27 @@ async def process_telegram_update(
             send_message(HELP_MESSAGE, chat_id)
 
         elif text.startswith("/status"):
-            send_message(build_status_message(agent_active, active_connections), chat_id)
+            send_message(
+                build_status_message(agent_active, active_connections), chat_id
+            )
 
         elif text.startswith("/cycle"):
             if not agent_active:
                 send_message(
                     "⚠️ <b>System Execution is OFF.</b>\n"
                     "Turn it ON from the dashboard first, then send /cycle.",
-                    chat_id
+                    chat_id,
                 )
             else:
                 send_message(
                     "🔄 <b>Analysis cycle triggered!</b>\n"
                     "Running market analysis in background...\n"
                     "You'll receive results shortly via Telegram.",
-                    chat_id
+                    chat_id,
                 )
                 try:
                     import asyncio
+
                     asyncio.create_task(trigger_cycle_fn())
                 except Exception as e:
                     logger.error(f"Error triggering cycle from Telegram: {e}")
@@ -312,7 +318,7 @@ async def process_telegram_update(
             send_message(
                 f"❓ Unknown command: <code>{text}</code>\n"
                 "Send /help to see available commands.",
-                chat_id
+                chat_id,
             )
 
     except Exception as e:

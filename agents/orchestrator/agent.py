@@ -39,6 +39,7 @@ from tools.definitions.system import (
     restart_agent_node,
     send_telegram_notification,
 )
+
 # Hermes-enhanced web scraping tools (httpx + BeautifulSoup)
 from tools.definitions.web_scraper import (
     scrape_kitco_news,
@@ -71,7 +72,9 @@ def get_llm(model_name: str = None) -> LLM:
             logger.info("LLM: Using Hermes 3 405B via OpenRouter (primary).")
             return llm
         except Exception as e:
-            logger.warning(f"OpenRouter Hermes 3 unavailable: {e}. Falling back to Groq.")
+            logger.warning(
+                f"OpenRouter Hermes 3 unavailable: {e}. Falling back to Groq."
+            )
 
     # Secondary failover: Groq LLaMA-3.3-70B
     if settings.GROQ_API_KEY:
@@ -79,7 +82,7 @@ def get_llm(model_name: str = None) -> LLM:
             llm = LLM(
                 model="groq/llama-3.3-70b-versatile",
                 api_key=settings.GROQ_API_KEY,
-                temperature=0.2
+                temperature=0.2,
             )
             logger.info("LLM: Using Groq LLaMA-3.3-70B (failover).")
             return llm
@@ -90,7 +93,7 @@ def get_llm(model_name: str = None) -> LLM:
     logger.warning("LLM: Using Groq LLaMA-3.1-8B-Instant (emergency fallback).")
     return LLM(
         model="groq/llama-3.1-8b-instant",
-        api_key=settings.GROQ_API_KEY or "gsk_mock_key_for_offline_runs"
+        api_key=settings.GROQ_API_KEY or "gsk_mock_key_for_offline_runs",
     )
 
 
@@ -143,7 +146,7 @@ def create_correlation_agent(llm: LLM) -> Agent:
             fetch_market_indices,
             fetch_treasury_yields,
             fetch_news_rss,
-            scrape_kitco_news,          # Hermes: Live Kitco gold news scraping
+            scrape_kitco_news,  # Hermes: Live Kitco gold news scraping
         ],
         llm=llm,
         allow_delegation=False,
@@ -167,7 +170,7 @@ def create_news_agent(llm: LLM) -> Agent:
             fetch_news_rss,
             analyze_news_sentiment,
             fetch_economic_calendar,
-            scrape_kitco_news,              # Hermes: Live Kitco gold news
+            scrape_kitco_news,  # Hermes: Live Kitco gold news
             scrape_forex_factory_calendar,  # Hermes: Live Forex Factory impact ratings
         ],
         llm=llm,

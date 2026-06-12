@@ -131,8 +131,16 @@ class HermesMemoryStore:
                     """INSERT INTO agent_lessons
                        (agent_name, mistake, correction, lesson, context, outcome, created_at, relevance_score)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (agent_name, mistake, correction, lesson, context, outcome,
-                     datetime.utcnow().isoformat(), 1.0)
+                    (
+                        agent_name,
+                        mistake,
+                        correction,
+                        lesson,
+                        context,
+                        outcome,
+                        datetime.utcnow().isoformat(),
+                        1.0,
+                    ),
                 )
                 conn.commit()
                 logger.info(f"Lesson saved for {agent_name}: {lesson[:80]}...")
@@ -144,10 +152,7 @@ class HermesMemoryStore:
                 conn.close()
 
     def get_lessons(
-        self,
-        agent_name: str,
-        k: int = 5,
-        search_query: Optional[str] = None
+        self, agent_name: str, k: int = 5, search_query: Optional[str] = None
     ) -> str:
         """
         Retrieve the most recent and relevant lessons for an agent.
@@ -172,7 +177,7 @@ class HermesMemoryStore:
                        JOIN lessons_fts fts ON al.id = fts.rowid
                        WHERE al.agent_name = ? AND lessons_fts MATCH ?
                        ORDER BY al.created_at DESC LIMIT ?""",
-                    (agent_name, search_query, k)
+                    (agent_name, search_query, k),
                 )
                 lessons = cursor.fetchall()
 
@@ -182,14 +187,14 @@ class HermesMemoryStore:
                     """SELECT * FROM agent_lessons
                        WHERE agent_name = ?
                        ORDER BY created_at DESC LIMIT ?""",
-                    (agent_name, k)
+                    (agent_name, k),
                 )
                 lessons = cursor.fetchall()
 
             if not lessons:
                 return ""
 
-            formatted = f"\n\nCRITICAL LESSONS LEARNED FROM PAST MISTAKES (MANDATORY — You MUST apply these and never repeat these errors):\n"
+            formatted = "\n\nCRITICAL LESSONS LEARNED FROM PAST MISTAKES (MANDATORY — You MUST apply these and never repeat these errors):\n"
             for idx, row in enumerate(lessons):
                 formatted += (
                     f"\nLesson {idx + 1} [{row['outcome'].upper()}] — {row['created_at'][:10]}:\n"
@@ -197,7 +202,7 @@ class HermesMemoryStore:
                     f"  Corrective Action: {row['correction']}\n"
                     f"  Key Lesson: {row['lesson']}\n"
                 )
-                if row['context']:
+                if row["context"]:
                     formatted += f"  Market Context: {row['context']}\n"
 
             return formatted
@@ -234,8 +239,14 @@ class HermesMemoryStore:
                     """INSERT INTO cycle_observations
                        (cycle_id, agent_name, observation, market_condition, gold_price, created_at)
                        VALUES (?, ?, ?, ?, ?, ?)""",
-                    (cycle_id, agent_name, observation, market_condition,
-                     gold_price, datetime.utcnow().isoformat())
+                    (
+                        cycle_id,
+                        agent_name,
+                        observation,
+                        market_condition,
+                        gold_price,
+                        datetime.utcnow().isoformat(),
+                    ),
                 )
                 conn.commit()
                 return True
@@ -252,7 +263,7 @@ class HermesMemoryStore:
             cursor = conn.execute(
                 """SELECT * FROM cycle_observations
                    ORDER BY created_at DESC LIMIT ?""",
-                (limit,)
+                (limit,),
             )
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
@@ -269,7 +280,7 @@ class HermesMemoryStore:
             if agent_name:
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM agent_lessons WHERE agent_name = ?",
-                    (agent_name,)
+                    (agent_name,),
                 )
             else:
                 cursor = conn.execute("SELECT COUNT(*) FROM agent_lessons")
@@ -288,7 +299,9 @@ class HermesMemoryStore:
                 """SELECT agent_name, COUNT(*) as count
                    FROM agent_lessons GROUP BY agent_name"""
             )
-            agent_counts = {row["agent_name"]: row["count"] for row in agents_cursor.fetchall()}
+            agent_counts = {
+                row["agent_name"]: row["count"] for row in agents_cursor.fetchall()
+            }
 
             obs_cursor = conn.execute("SELECT COUNT(*) FROM cycle_observations")
             obs_count = obs_cursor.fetchone()[0]

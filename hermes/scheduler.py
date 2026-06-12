@@ -53,7 +53,9 @@ class HermesScheduler:
                         if asyncio.iscoroutinefunction(briefing_fn):
                             await briefing_fn()
                         else:
-                            await asyncio.get_event_loop().run_in_executor(None, briefing_fn)
+                            await asyncio.get_event_loop().run_in_executor(
+                                None, briefing_fn
+                            )
                     except Exception as e:
                         logger.error(f"Morning briefing execution failed: {e}")
                 else:
@@ -77,6 +79,7 @@ class HermesScheduler:
         if now >= next_run or now.weekday() >= 5:
             # Move to next day
             from datetime import timedelta
+
             next_run = next_run + timedelta(days=1)
             # Skip weekend
             while next_run.weekday() >= 5:
@@ -95,12 +98,16 @@ class HermesScheduler:
         if morning_briefing_fn:
             task = asyncio.create_task(
                 self._run_morning_briefing(morning_briefing_fn),
-                name="hermes_morning_briefing"
+                name="hermes_morning_briefing",
             )
             self._tasks.append(task)
-            logger.info("HermesScheduler: Morning briefing cron started (9 AM UTC, Mon-Fri).")
+            logger.info(
+                "HermesScheduler: Morning briefing cron started (9 AM UTC, Mon-Fri)."
+            )
 
-        logger.info(f"HermesScheduler started with {len(self._tasks)} scheduled task(s).")
+        logger.info(
+            f"HermesScheduler started with {len(self._tasks)} scheduled task(s)."
+        )
 
     def stop(self):
         """

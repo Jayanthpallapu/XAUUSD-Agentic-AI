@@ -41,6 +41,7 @@ agent_active = False
 # APScheduler: kept as optional fallback but Hermes scheduler is primary
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
+
     SCHEDULER_AVAILABLE = True
 except ImportError:
     SCHEDULER_AVAILABLE = False
@@ -322,7 +323,9 @@ def read_root():
         "time_utc": datetime.utcnow().isoformat(),
         "supabase_configured": settings.is_supabase_configured,
         "telegram_configured": settings.is_telegram_configured,
-        "hermes_llm": "OpenRouter Hermes 3 405B" if settings.OPENROUTER_API_KEY else "Groq LLaMA-3.3-70B",
+        "hermes_llm": "OpenRouter Hermes 3 405B"
+        if settings.OPENROUTER_API_KEY
+        else "Groq LLaMA-3.3-70B",
         "hermes_memory_lessons": mem_stats.get("total_lessons", 0),
     }
 
@@ -423,7 +426,9 @@ def get_agent_status():
         "shutdown_timer_running": ws_manager.disconnect_task is not None
         and not ws_manager.disconnect_task.done(),
         "hermes_memory": mem_stats,
-        "hermes_llm": "OpenRouter Hermes 3 405B" if settings.OPENROUTER_API_KEY else "Groq LLaMA-3.3-70B",
+        "hermes_llm": "OpenRouter Hermes 3 405B"
+        if settings.OPENROUTER_API_KEY
+        else "Groq LLaMA-3.3-70B",
     }
 
 
@@ -577,7 +582,10 @@ def hermes_telegram_register(webhook_url: str):
     success = register_webhook(webhook_url)
     if success:
         return {"status": "success", "webhook_url": webhook_url}
-    return {"status": "failed", "message": "Check TELEGRAM_BOT_TOKEN in environment variables."}
+    return {
+        "status": "failed",
+        "message": "Check TELEGRAM_BOT_TOKEN in environment variables.",
+    }
 
 
 async def _async_trigger_cycle():
@@ -586,6 +594,7 @@ async def _async_trigger_cycle():
     if agent_active:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, run_cycle_background)
+
 
 if MCP_AVAILABLE:
     mcp_sse = SseServerTransport("/mcp/messages")
@@ -620,9 +629,7 @@ async def lifespan(app):
     logger.info("Starting XAUUSD Agentic Company API (Hermes-Enhanced)...")
 
     # Start Hermes async scheduler (morning briefing at 9 AM UTC Mon-Fri)
-    hermes_scheduler.start(
-        morning_briefing_fn=FlowManager.run_morning_briefing
-    )
+    hermes_scheduler.start(morning_briefing_fn=FlowManager.run_morning_briefing)
 
     # Seed Hermes memory with foundational lessons if memory is empty
     total_lessons = hermes_memory.get_lesson_count()

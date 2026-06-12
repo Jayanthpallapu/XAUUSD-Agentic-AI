@@ -14,7 +14,6 @@ Hermes Memory Integration:
 """
 
 import logging
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
@@ -137,7 +136,9 @@ class FlowManager:
                             context=f"Gold price at SL: ${current_price:.2f}",
                             outcome="loss",
                         )
-                        logger.info(f"Hermes memory: SL lesson saved for Trade {trade_id[:8]}")
+                        logger.info(
+                            f"Hermes memory: SL lesson saved for Trade {trade_id[:8]}"
+                        )
 
         except Exception as e:
             logger.error(f"Error checking and closing trades: {e}")
@@ -177,7 +178,9 @@ class FlowManager:
             # === HERMES MEMORY: Save cycle observations ===
             FlowManager._save_cycle_to_memory(cycle_id, results)
 
-            logger.info(f"Cycle {cycle_id} completed in {duration:.1f}s. Hermes memory updated.")
+            logger.info(
+                f"Cycle {cycle_id} completed in {duration:.1f}s. Hermes memory updated."
+            )
             return results
 
         except Exception as e:
@@ -227,7 +230,9 @@ class FlowManager:
                     context=f"Cycle ID: {cycle_id}",
                     outcome="rejection",
                 )
-                logger.info(f"Hermes memory: QA rejection lesson saved for cycle {cycle_id[:8]}")
+                logger.info(
+                    f"Hermes memory: QA rejection lesson saved for cycle {cycle_id[:8]}"
+                )
 
             # Save supervisor findings as SupervisorAgent lessons
             supervisor = results.get("supervisor", {})
@@ -274,7 +279,10 @@ class FlowManager:
         Triggered by Hermes scheduler at 9 AM UTC, Mon-Fri.
         """
         try:
-            from tools.definitions.market_data import fetch_gold_price, fetch_market_indices
+            from tools.definitions.market_data import (
+                fetch_gold_price,
+                fetch_market_indices,
+            )
             from tools.definitions.news_calendar import fetch_economic_calendar
             from tools.definitions.system import send_telegram_notification
 
@@ -402,4 +410,6 @@ class FlowManager:
             context="Default seed lesson",
             outcome="loss",
         )
-        logger.info("Default mock training lessons seeded in Agent registry and Hermes Memory Bank.")
+        logger.info(
+            "Default mock training lessons seeded in Agent registry and Hermes Memory Bank."
+        )

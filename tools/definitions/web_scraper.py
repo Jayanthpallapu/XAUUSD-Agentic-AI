@@ -11,9 +11,8 @@ Scrapers included:
 """
 
 import logging
-import asyncio
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import Optional
 from crewai.tools import tool
 
 logger = logging.getLogger("web_scraper_tools")
@@ -21,13 +20,17 @@ logger = logging.getLogger("web_scraper_tools")
 # Optional imports with graceful fallbacks
 try:
     import httpx
+
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
-    logger.warning("httpx not installed. Web scraping tools will use requests fallback.")
+    logger.warning(
+        "httpx not installed. Web scraping tools will use requests fallback."
+    )
 
 try:
     from bs4 import BeautifulSoup
+
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -48,7 +51,9 @@ def _get_html(url: str, timeout: int = 15) -> Optional[str]:
     """Fetch raw HTML from a URL using httpx or requests fallback."""
     if HTTPX_AVAILABLE:
         try:
-            with httpx.Client(headers=HEADERS, timeout=timeout, follow_redirects=True) as client:
+            with httpx.Client(
+                headers=HEADERS, timeout=timeout, follow_redirects=True
+            ) as client:
                 res = client.get(url)
                 if res.status_code == 200:
                     return res.text
@@ -58,6 +63,7 @@ def _get_html(url: str, timeout: int = 15) -> Optional[str]:
     else:
         try:
             import requests
+
             res = requests.get(url, headers=HEADERS, timeout=timeout)
             if res.status_code == 200:
                 return res.text
@@ -107,14 +113,19 @@ def scrape_kitco_news() -> str:
         if not items:
             # Fallback: get all headline links
             links = soup.find_all("a", href=True)
-            items = [l for l in links if "/news/" in str(l.get("href", "")) and l.get_text(strip=True)][:10]
+            items = [
+                link
+                for link in links
+                if "/news/" in str(link.get("href", "")) and link.get_text(strip=True)
+            ][:10]
 
         for item in items[:8]:
             # Try to get title
             title_el = (
-                item.find("h2") or item.find("h3") or
-                item.find(class_=lambda x: x and "title" in x.lower()) or
-                item
+                item.find("h2")
+                or item.find("h3")
+                or item.find(class_=lambda x: x and "title" in x.lower())
+                or item
             )
             title = title_el.get_text(strip=True) if title_el else ""
 
@@ -122,14 +133,47 @@ def scrape_kitco_news() -> str:
                 continue
 
             # Try to get time
-            time_el = item.find("time") or item.find(class_=lambda x: x and "date" in str(x).lower())
+            time_el = item.find("time") or item.find(
+                class_=lambda x: x and "date" in str(x).lower()
+            )
             pub_time = time_el.get_text(strip=True) if time_el else "Recent"
 
             # Simple sentiment
             lower = title.lower()
-            bullish = any(w in lower for w in ["rise", "surge", "gains", "up", "rally", "bullish", "high", "demand", "buy"])
-            bearish = any(w in lower for w in ["fall", "drop", "down", "bearish", "sell", "plunge", "lower", "loss"])
-            sentiment = "Bullish" if bullish and not bearish else "Bearish" if bearish and not bullish else "Neutral"
+            bullish = any(
+                w in lower
+                for w in [
+                    "rise",
+                    "surge",
+                    "gains",
+                    "up",
+                    "rally",
+                    "bullish",
+                    "high",
+                    "demand",
+                    "buy",
+                ]
+            )
+            bearish = any(
+                w in lower
+                for w in [
+                    "fall",
+                    "drop",
+                    "down",
+                    "bearish",
+                    "sell",
+                    "plunge",
+                    "lower",
+                    "loss",
+                ]
+            )
+            sentiment = (
+                "Bullish"
+                if bullish and not bearish
+                else "Bearish"
+                if bearish and not bullish
+                else "Neutral"
+            )
 
             articles.append(f"• [{sentiment}] {title} ({pub_time})")
 
@@ -137,9 +181,9 @@ def scrape_kitco_news() -> str:
             return "No gold news articles found on Kitco at this time."
 
         return (
-            "📰 Kitco Gold News (Live):\n\n" +
-            "\n".join(articles) +
-            "\n\nSource: kitco.com/news/gold"
+            "📰 Kitco Gold News (Live):\n\n"
+            + "\n".join(articles)
+            + "\n\nSource: kitco.com/news/gold"
         )
 
     except Exception as e:
@@ -213,8 +257,16 @@ def scrape_forex_factory_calendar() -> str:
                 forecast = forecast_el.get_text(strip=True) if forecast_el else "—"
                 previous = previous_el.get_text(strip=True) if previous_el else "—"
 
-                if event_name and impact in ["HIGH", "MEDIUM"] and currency in ["USD", "XAU"]:
-                    gold_impact = "⚡ Directly impacts Gold" if currency == "USD" else "🥇 Gold-specific event"
+                if (
+                    event_name
+                    and impact in ["HIGH", "MEDIUM"]
+                    and currency in ["USD", "XAU"]
+                ):
+                    gold_impact = (
+                        "⚡ Directly impacts Gold"
+                        if currency == "USD"
+                        else "🥇 Gold-specific event"
+                    )
                     events.append(
                         f"⏰ {event_time} | 💵 {currency} | {impact} IMPACT\n"
                         f"  📌 {event_name}\n"
@@ -233,9 +285,9 @@ def scrape_forex_factory_calendar() -> str:
 
         return (
             f"📅 Forex Factory Calendar — {today} (UTC):\n"
-            "(Showing HIGH & MEDIUM impact USD events only)\n\n" +
-            "\n\n".join(events) +
-            "\n\nSource: forexfactory.com/calendar"
+            "(Showing HIGH & MEDIUM impact USD events only)\n\n"
+            + "\n\n".join(events)
+            + "\n\nSource: forexfactory.com/calendar"
         )
 
     except Exception as e:
