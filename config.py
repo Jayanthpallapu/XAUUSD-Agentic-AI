@@ -13,7 +13,8 @@ else:
 class Settings:
     PORT: int = int(os.getenv("PORT", 8000))
 
-    # LLM Settings
+    # LLM Settings — Hermes 3 via OpenRouter (primary) + Groq (failover)
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
     # Supabase Settings
@@ -51,6 +52,14 @@ class Settings:
     @property
     def is_telegram_configured(self) -> bool:
         return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID)
+
+    @property
+    def is_openrouter_configured(self) -> bool:
+        """True if OpenRouter API key is set and not a placeholder."""
+        if not self.OPENROUTER_API_KEY:
+            return False
+        placeholders = ["placeholder", "your_openrouter", "sk-or-"]
+        return not any(p in self.OPENROUTER_API_KEY.lower() for p in ["placeholder", "your_openrouter"])
 
 
 settings = Settings()

@@ -24,6 +24,11 @@ from config import settings
 from governance.audit.supabase_client import db_service
 from orchestration.graph import FlowManager
 
+# Hermes Agent imports
+from hermes.memory_store import hermes_memory
+from hermes.scheduler import hermes_scheduler
+from hermes.telegram_gateway import process_telegram_update, register_webhook
+
 # Setup Logger
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -33,14 +38,14 @@ logger = logging.getLogger("api_server")
 # Global Agent execution control state
 agent_active = False
 
+# APScheduler: kept as optional fallback but Hermes scheduler is primary
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
-
     SCHEDULER_AVAILABLE = True
 except ImportError:
     SCHEDULER_AVAILABLE = False
-    logger.warning(
-        "APScheduler package not installed. Scheduled task execution disabled."
+    logger.info(
+        "APScheduler not installed. Hermes async scheduler is active as primary."
     )
 
 # Optional starlette sse transport for MCP
@@ -310,12 +315,15 @@ def scheduled_job():
 # 4. Standard Dashboard API Routes
 @app.get("/")
 def read_root():
+    mem_stats = hermes_memory.get_stats()
     return {
         "status": "online",
         "market": "XAUUSD",
         "time_utc": datetime.utcnow().isoformat(),
         "supabase_configured": settings.is_supabase_configured,
         "telegram_configured": settings.is_telegram_configured,
+        "hermes_llm": "OpenRouter Hermes 3 405B" if settings.OPENROUTER_API_KEY else "Groq LLaMA-3.3-70B",
+        "hermes_memory_lessons": mem_stats.get("total_lessons", 0),
     }
 
 
@@ -408,11 +416,37 @@ def debug_audit():
 @app.get("/api/agent/status")
 def get_agent_status():
     global agent_active
+    mem_stats = hermes_memory.get_stats()
     return {
         "agent_active": agent_active,
         "active_connections": len(ws_manager.active_connections),
         "shutdown_timer_running": ws_manager.disconnect_task is not None
         and not ws_manager.disconnect_task.done(),
+        "hermes_memory": mem_stats,
+        "hermes_llm": "OpenRouter Hermes 3 405B" if settings.OPENROUTER_API_KEY else "Groq LLaMA-3.3-70B",
+    }
+
+
+@app.get("/api/hermes/memory")
+def get_hermes_memory():
+    """Returns Hermes persistent memory statistics — lesson counts per agent."""
+    stats = hermes_memory.get_stats()
+    observations = hermes_memory.get_recent_observations(limit=10)
+    return {
+        "stats": stats,
+        "recent_observations": observations,
+    }
+
+
+@app.get("/api/hermes/lessons/{agent_name}")
+def get_agent_lessons(agent_name: str):
+    """Returns all stored Hermes lessons for a specific agent."""
+    lessons_text = hermes_memory.get_lessons(agent_name, k=20)
+    count = hermes_memory.get_lesson_count(agent_name)
+    return {
+        "agent_name": agent_name,
+        "lesson_count": count,
+        "lessons_formatted": lessons_text,
     }
 
 
@@ -507,7 +541,52 @@ async def websocket_endpoint(websocket: WebSocket):
         await ws_manager.disconnect(websocket)
 
 
-# 5. Model Context Protocol (MCP) Server SSE Transport Endpoints
+# 5a. Hermes Telegram Webhook Endpoint (Two-Way Command Interface)
+@app.post("/hermes/telegram")
+async def hermes_telegram_webhook(request: Request):
+    """
+    Receives Telegram bot updates via webhook.
+    Routes commands (/cycle, /positions, /status, /report, /memory, /help)
+    to the appropriate handler using the existing TELEGRAM_BOT_TOKEN.
+
+    Setup: Register webhook once by calling:
+      POST /hermes/telegram/register?webhook_url=https://your-domain.com/hermes/telegram
+    """
+    global agent_active
+    try:
+        update = await request.json()
+        await process_telegram_update(
+            update=update,
+            agent_active=agent_active,
+            active_connections=len(ws_manager.active_connections),
+            trigger_cycle_fn=_async_trigger_cycle,
+        )
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Hermes Telegram webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/hermes/telegram/register")
+def hermes_telegram_register(webhook_url: str):
+    """
+    Register the Telegram webhook URL with the Telegram Bot API.
+    Call this once after deploying to production with your Render URL:
+      POST /hermes/telegram/register?webhook_url=https://your-app.onrender.com/hermes/telegram
+    """
+    success = register_webhook(webhook_url)
+    if success:
+        return {"status": "success", "webhook_url": webhook_url}
+    return {"status": "failed", "message": "Check TELEGRAM_BOT_TOKEN in environment variables."}
+
+
+async def _async_trigger_cycle():
+    """Async wrapper to trigger a cycle from Telegram command."""
+    global agent_active
+    if agent_active:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, run_cycle_background)
+
 if MCP_AVAILABLE:
     mcp_sse = SseServerTransport("/mcp/messages")
 
@@ -537,7 +616,27 @@ if MCP_AVAILABLE:
 # 6. Service Lifecycles (lifespan replaces deprecated @app.on_event)
 @asynccontextmanager
 async def lifespan(app):
-    # Startup
+    # ====== STARTUP ======
+    logger.info("Starting XAUUSD Agentic Company API (Hermes-Enhanced)...")
+
+    # Start Hermes async scheduler (morning briefing at 9 AM UTC Mon-Fri)
+    hermes_scheduler.start(
+        morning_briefing_fn=FlowManager.run_morning_briefing
+    )
+
+    # Seed Hermes memory with foundational lessons if memory is empty
+    total_lessons = hermes_memory.get_lesson_count()
+    if total_lessons == 0:
+        logger.info("Hermes Memory Bank is empty. Seeding foundational lessons...")
+        try:
+            FlowManager.backfill_lessons(days=15)
+        except Exception as e:
+            logger.warning(f"Non-critical: Could not seed Hermes memory: {e}")
+    else:
+        logger.info(f"Hermes Memory Bank loaded: {total_lessons} lessons available.")
+
+    # APScheduler as optional fallback for interval-based scheduling
+    scheduler = None
     if SCHEDULER_AVAILABLE:
         scheduler = BackgroundScheduler()
         scheduler.add_job(
@@ -548,11 +647,16 @@ async def lifespan(app):
         )
         scheduler.start()
         logger.info(
-            f"APScheduler initialized. Configured to run every {settings.RUN_INTERVAL_MINUTES} minutes (Monday to Friday only)."
+            f"APScheduler (fallback) initialized: every {settings.RUN_INTERVAL_MINUTES} min."
         )
+
     yield
-    # Shutdown (add cleanup here if needed)
-    if SCHEDULER_AVAILABLE:
+
+    # ====== SHUTDOWN ======
+    hermes_scheduler.stop()
+    logger.info("Hermes scheduler stopped.")
+
+    if SCHEDULER_AVAILABLE and scheduler:
         try:
             scheduler.shutdown(wait=False)
             logger.info("APScheduler shut down successfully.")

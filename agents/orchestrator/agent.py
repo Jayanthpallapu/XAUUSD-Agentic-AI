@@ -12,6 +12,9 @@ from api.schemas.models import (
     SupervisorReport,
 )
 
+# Hermes persistent memory — replaces static lessons backstory
+from hermes.memory_store import hermes_memory
+
 # Import tools using absolute project imports
 from tools.definitions.market_data import (
     fetch_gold_price,
@@ -36,24 +39,77 @@ from tools.definitions.system import (
     restart_agent_node,
     send_telegram_notification,
 )
+# Hermes-enhanced web scraping tools (httpx + BeautifulSoup)
+from tools.definitions.web_scraper import (
+    scrape_kitco_news,
+    scrape_forex_factory_calendar,
+)
 
 logger = logging.getLogger("crew_setup")
 
 
-def get_llm(model_name: str = "groq/llama-3.3-70b-versatile") -> LLM:
+def get_llm(model_name: str = None) -> LLM:
+    """
+    Returns the best available LLM with Hermes 3 via OpenRouter as primary.
+    Failover chain: OpenRouter Hermes 3 → Groq LLaMA-3.3-70B → Groq LLaMA-3.1-8B
+
+    Hermes 3 (NousResearch) is specifically optimized for:
+    - Advanced function calling & structured JSON outputs
+    - Long-context retention across multi-step agent chains
+    - Financial analysis and tool-use reasoning
+    """
+    # Primary: Hermes 3 via OpenRouter (free tier, best function calling)
+    if settings.OPENROUTER_API_KEY:
+        try:
+            hermes_model = "openrouter/nousresearch/hermes-3-llama-3.1-405b"
+            llm = LLM(
+                model=hermes_model,
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                temperature=0.15,
+            )
+            logger.info("LLM: Using Hermes 3 405B via OpenRouter (primary).")
+            return llm
+        except Exception as e:
+            logger.warning(f"OpenRouter Hermes 3 unavailable: {e}. Falling back to Groq.")
+
+    # Secondary failover: Groq LLaMA-3.3-70B
     if settings.GROQ_API_KEY:
         try:
-            return LLM(model=model_name, api_key=settings.GROQ_API_KEY, temperature=0.2)
-        except Exception as e:
-            logger.error(
-                f"Error creating LLM: {e}. Falling back to default system model."
+            llm = LLM(
+                model="groq/llama-3.3-70b-versatile",
+                api_key=settings.GROQ_API_KEY,
+                temperature=0.2
             )
+            logger.info("LLM: Using Groq LLaMA-3.3-70B (failover).")
+            return llm
+        except Exception as e:
+            logger.error(f"Groq LLM creation failed: {e}. Using lightweight fallback.")
+
+    # Final fallback: Groq lightweight model
+    logger.warning("LLM: Using Groq LLaMA-3.1-8B-Instant (emergency fallback).")
     return LLM(
-        model="groq/llama-3.1-8b-instant", api_key="gsk_mock_key_for_offline_runs"
+        model="groq/llama-3.1-8b-instant",
+        api_key=settings.GROQ_API_KEY or "gsk_mock_key_for_offline_runs"
     )
 
 
 def fetch_lessons_backstory(agent_name: str) -> str:
+    """
+    Retrieves agent lessons from Hermes persistent memory (SQLite).
+    Falls back to Supabase DB lessons if memory store is empty.
+
+    Hermes memory grows automatically after every cycle — agents
+    accumulate knowledge indefinitely and recall it on every run.
+    """
+    # Primary: Hermes persistent memory (SQLite — grows with every cycle)
+    memory_lessons = hermes_memory.get_lessons(agent_name, k=5)
+    if memory_lessons:
+        lesson_count = hermes_memory.get_lesson_count(agent_name)
+        logger.info(f"Loaded {lesson_count} Hermes memory lessons for {agent_name}.")
+        return memory_lessons
+
+    # Fallback: Supabase DB lessons (static, from initial setup)
     try:
         res = db_service.select("agent_registry", {"name": agent_name})
         if res:
@@ -65,7 +121,7 @@ def fetch_lessons_backstory(agent_name: str) -> str:
                     formatted += f"Lesson {idx + 1}:\n- Past Mistake: {item.get('mistake')}\n- Corrective Action: {item.get('correction')}\n- Teacher Lesson: {item.get('lesson')}\n"
                 return formatted
     except Exception as e:
-        logger.error(f"Error fetching lessons backstory for {agent_name}: {e}")
+        logger.error(f"Error fetching Supabase lessons backstory for {agent_name}: {e}")
     return ""
 
 
@@ -87,6 +143,7 @@ def create_correlation_agent(llm: LLM) -> Agent:
             fetch_market_indices,
             fetch_treasury_yields,
             fetch_news_rss,
+            scrape_kitco_news,          # Hermes: Live Kitco gold news scraping
         ],
         llm=llm,
         allow_delegation=False,
@@ -110,6 +167,8 @@ def create_news_agent(llm: LLM) -> Agent:
             fetch_news_rss,
             analyze_news_sentiment,
             fetch_economic_calendar,
+            scrape_kitco_news,              # Hermes: Live Kitco gold news
+            scrape_forex_factory_calendar,  # Hermes: Live Forex Factory impact ratings
         ],
         llm=llm,
         allow_delegation=False,

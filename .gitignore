@@ -44,3 +44,7 @@ frontend/build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Hermes persistent memory DB (local SQLite - do not commit)
+hermes_memory.db
+*.db
