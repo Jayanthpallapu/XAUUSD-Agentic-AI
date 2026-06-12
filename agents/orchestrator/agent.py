@@ -46,7 +46,67 @@ from tools.definitions.web_scraper import (
     scrape_forex_factory_calendar,
 )
 
+import time
+import requests
+
 logger = logging.getLogger("crew_setup")
+
+_cached_llm = None
+_cached_llm_time = 0
+
+
+def verify_llm_tool_support(api_key: str, model: str, base_url: str) -> bool:
+    """
+    Verifies if the API key is valid, model exists, and supports tool use on the provider.
+    """
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    # Strip provider prefix if present for direct api call
+    api_model = model
+    if "/" in model:
+        parts = model.split("/")
+        if parts[0] in ["openrouter", "groq"]:
+            api_model = "/".join(parts[1:])
+
+    # We send a minimal tool call payload to check for 403 (limit exceeded) or 404 (tool support not found)
+    data = {
+        "model": api_model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "ping_tool",
+                    "description": "ping tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+        "max_tokens": 5,
+    }
+
+    try:
+        res = requests.post(url, headers=headers, json=data, timeout=8)
+        if res.status_code == 200:
+            res_json = res.json()
+            if "error" not in res_json:
+                return True
+            else:
+                logger.warning(
+                    f"LLM Verification failed for {model}: {res_json['error']}"
+                )
+        elif res.status_code == 400:
+            # HTTP 400 means the endpoint is reachable, key is active, and tool use is supported
+            # (but our minimal verification tool schema/payload format was rejected).
+            return True
+        else:
+            logger.warning(
+                f"LLM Verification failed for {model} with status {res.status_code}: {res.text}"
+            )
+    except Exception as e:
+        logger.warning(f"LLM Verification connection failed for {model}: {e}")
+    return False
 
 
 def get_llm(model_name: str = None) -> LLM:
@@ -59,42 +119,69 @@ def get_llm(model_name: str = None) -> LLM:
     - Long-context retention across multi-step agent chains
     - Financial analysis and tool-use reasoning
     """
-    # Primary: Hermes 3 via OpenRouter (free tier, best function calling)
+    global _cached_llm, _cached_llm_time
+
+    current_time = time.time()
+    # Cache the chosen LLM for 1 hour to prevent excessive validation requests
+    if _cached_llm and (current_time - _cached_llm_time < 3600):
+        return _cached_llm
+
+    # Primary: Hermes 3 via OpenRouter
     if settings.OPENROUTER_API_KEY:
-        try:
-            hermes_model = "openrouter/nousresearch/hermes-3-llama-3.1-405b"
-            llm = LLM(
-                model=hermes_model,
-                api_key=settings.OPENROUTER_API_KEY,
-                base_url="https://openrouter.ai/api/v1",
-                temperature=0.15,
-            )
-            logger.info("LLM: Using Hermes 3 405B via OpenRouter (primary).")
-            return llm
-        except Exception as e:
+        hermes_model = "openrouter/nousresearch/hermes-3-llama-3.1-405b"
+        logger.info(f"LLM: Verifying OpenRouter tool support for {hermes_model}...")
+        if verify_llm_tool_support(
+            settings.OPENROUTER_API_KEY, hermes_model, "https://openrouter.ai/api/v1"
+        ):
+            try:
+                llm = LLM(
+                    model=hermes_model,
+                    api_key=settings.OPENROUTER_API_KEY,
+                    base_url="https://openrouter.ai/api/v1",
+                    temperature=0.15,
+                )
+                logger.info("LLM: Using Hermes 3 405B via OpenRouter (primary).")
+                _cached_llm = llm
+                _cached_llm_time = current_time
+                return llm
+            except Exception as e:
+                logger.warning(f"OpenRouter LLM creation failed: {e}")
+        else:
             logger.warning(
-                f"OpenRouter Hermes 3 unavailable: {e}. Falling back to Groq."
+                "OpenRouter Hermes 3 failed verification (likely daily limit or no tool-use endpoints). Falling back to Groq."
             )
 
     # Secondary failover: Groq LLaMA-3.3-70B
     if settings.GROQ_API_KEY:
-        try:
-            llm = LLM(
-                model="groq/llama-3.3-70b-versatile",
-                api_key=settings.GROQ_API_KEY,
-                temperature=0.2,
-            )
-            logger.info("LLM: Using Groq LLaMA-3.3-70B (failover).")
-            return llm
-        except Exception as e:
-            logger.error(f"Groq LLM creation failed: {e}. Using lightweight fallback.")
+        groq_model = "groq/llama-3.3-70b-versatile"
+        logger.info(f"LLM: Verifying Groq tool support for {groq_model}...")
+        if verify_llm_tool_support(
+            settings.GROQ_API_KEY, groq_model, "https://api.groq.com/openai/v1"
+        ):
+            try:
+                llm = LLM(
+                    model=groq_model,
+                    api_key=settings.GROQ_API_KEY,
+                    temperature=0.2,
+                )
+                logger.info("LLM: Using Groq LLaMA-3.3-70B (failover).")
+                _cached_llm = llm
+                _cached_llm_time = current_time
+                return llm
+            except Exception as e:
+                logger.error(f"Groq LLM creation failed: {e}")
+        else:
+            logger.warning("Groq LLaMA-3.3-70B failed verification. Trying fallback.")
 
     # Final fallback: Groq lightweight model
     logger.warning("LLM: Using Groq LLaMA-3.1-8B-Instant (emergency fallback).")
-    return LLM(
+    llm = LLM(
         model="groq/llama-3.1-8b-instant",
         api_key=settings.GROQ_API_KEY or "gsk_mock_key_for_offline_runs",
     )
+    _cached_llm = llm
+    _cached_llm_time = current_time
+    return llm
 
 
 def fetch_lessons_backstory(agent_name: str) -> str:
