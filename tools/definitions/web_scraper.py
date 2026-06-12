@@ -95,16 +95,34 @@ def scrape_kitco_news() -> str:
                 pub = entry.get("published", "Recent")[:16]
                 lower = title.lower()
                 bullish = any(
-                    w in lower for w in ["rise", "surge", "gain", "rally", "high", "buy", "bullish"]
+                    w in lower
+                    for w in [
+                        "rise",
+                        "surge",
+                        "gain",
+                        "rally",
+                        "high",
+                        "buy",
+                        "bullish",
+                    ]
                 )
                 bearish = any(
-                    w in lower for w in ["fall", "drop", "plunge", "bear", "sell", "low", "loss"]
+                    w in lower
+                    for w in ["fall", "drop", "plunge", "bear", "sell", "low", "loss"]
                 )
                 sentiment = (
-                    "Bullish" if bullish and not bearish else "Bearish" if bearish and not bullish else "Neutral"
+                    "Bullish"
+                    if bullish and not bearish
+                    else "Bearish"
+                    if bearish and not bullish
+                    else "Neutral"
                 )
                 articles.append(f"• [{sentiment}] {title} ({pub})")
-            return "📰 Kitco Gold News (Live RSS):\n\n" + "\n".join(articles) + "\n\nSource: kitco.com"
+            return (
+                "📰 Kitco Gold News (Live RSS):\n\n"
+                + "\n".join(articles)
+                + "\n\nSource: kitco.com"
+            )
     except Exception as rss_err:
         logger.warning(f"Kitco RSS failed: {rss_err}. Trying web scrape...")
 

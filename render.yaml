@@ -10,3 +10,5 @@ services:
         value: https://xauusd-agentic-ai.vercel.app,https://xauusd-agentic-ai-6g3p.vercel.app
       - key: PYTHON_VERSION
         value: "3.11"
+      - key: OPENROUTER_API_KEY
+        sync: false
