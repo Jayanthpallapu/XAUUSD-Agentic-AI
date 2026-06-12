@@ -533,6 +533,175 @@ def restart_agent(name: str):
     }
 
 
+AGENT_STATIC_METADATA = {
+    "CorrelationAgent": {
+        "goal": "Analyze prices and financial news of correlated instruments to determine their net impact on Gold price (XAUUSD).",
+        "backstory": "You are a Senior Quantitative Analyst specializing in macro correlations. You analyze DXY, EURUSD, US10Y yields, Bitcoin, VIX, Silver, Oil, Copper, and S&P500 to evaluate if macro trends are net bullish or bearish for Gold. You calculate correlation alignments and support decisions with data.",
+        "tools": [
+            {
+                "name": "fetch_forex_prices",
+                "description": "Fetches current exchange rate for key forex currency pairs.",
+            },
+            {
+                "name": "fetch_commodities_prices",
+                "description": "Fetches current price of key commodity pairs (Oil, Silver, Copper).",
+            },
+            {
+                "name": "fetch_crypto_prices",
+                "description": "Fetches current price of key cryptocurrencies (BTC, ETH).",
+            },
+            {
+                "name": "fetch_market_indices",
+                "description": "Fetches key stock indices values (S&P500, VIX, DXY).",
+            },
+            {
+                "name": "fetch_treasury_yields",
+                "description": "Fetches 10-Year U.S. Treasury Bond yields.",
+            },
+            {
+                "name": "fetch_news_rss",
+                "description": "Fetches latest financial news RSS feed for query.",
+            },
+            {
+                "name": "scrape_kitco_news",
+                "description": "Scrapes Kitco Gold news and runs sentiment analysis.",
+            },
+        ],
+    },
+    "NewsAgent": {
+        "goal": "Scrape and analyze gold spot news, federal speeches, geopolitical events, and economic announcements to gauge gold market sentiment.",
+        "backstory": "You are a veteran Financial Journalist and Market Sentiment Specialist. You monitor breaking geopolitical events, central bank announcements, CPI inflation releases, and FOMC speeches. You understand how gold price volatility flows back to impact other correlated pairs.",
+        "tools": [
+            {
+                "name": "fetch_gold_price",
+                "description": "Fetches current real-time or near-real-time Gold spot price.",
+            },
+            {
+                "name": "fetch_news_rss",
+                "description": "Fetches latest financial news RSS feed for query.",
+            },
+            {
+                "name": "analyze_news_sentiment",
+                "description": "Analyzes financial text/headlines and grades sentiment (Bullish/Bearish).",
+            },
+            {
+                "name": "fetch_economic_calendar",
+                "description": "Fetches daily economic calendar release schedules.",
+            },
+            {
+                "name": "scrape_kitco_news",
+                "description": "Scrapes Kitco Gold news and runs sentiment analysis.",
+            },
+            {
+                "name": "scrape_forex_factory_calendar",
+                "description": "Scrapes Forex Factory calendar for event impact ratings.",
+            },
+        ],
+    },
+    "TradingAgent": {
+        "goal": "Observe how the spot price of Gold is reacting to the compiled news and correlation alignments, and execute simulated paper trades.",
+        "backstory": "You are an Elite Commodity Trader. You receive fundamental correlation sheets and news sentiment reports, watch the live spot price of Gold (XAUUSD), and identify technical entries. You place simulated paper trades (BUY, SELL, or HOLD) with exact entry, stop loss, and take profit levels. Your trade rules require a risk/reward ratio of at least 1:1.5 and careful risk control based on a starting capital of $10,000 USD.",
+        "tools": [
+            {
+                "name": "fetch_gold_price",
+                "description": "Fetches current real-time or near-real-time Gold spot price.",
+            },
+            {
+                "name": "execute_paper_trade",
+                "description": "Executes a simulated paper trade (BUY/SELL) with SL/TP targets.",
+            },
+        ],
+    },
+    "QAAgent": {
+        "goal": "Audit and review the research data, news analysis, and trading signals to ensure logical consistency, correct inputs, and identify improvements.",
+        "backstory": "You are a strict Risk Manager and Quality Auditor. You inspect the output of the researchers and the trading agent. You verify that the trading agent's entries, stop losses, and take profits align with the direction (e.g. SL is below entry for BUY) and make logical sense given the news sentiment. You flag errors, adjust confidence levels, and list improvement suggestions.",
+        "tools": [
+            {
+                "name": "fetch_gold_price",
+                "description": "Fetches current real-time or near-real-time Gold spot price.",
+            }
+        ],
+    },
+    "PerformanceAgent": {
+        "goal": "Observe closed trade results, maintain performance records, compile profit metrics, and score the accuracy of all worker agents.",
+        "backstory": "You are a Trading Desk Performance Controller. You calculate performance metrics like win rate, drawdowns, profit factor, and overall portfolio health. You track the accuracy of signals over time and help identify which agents are making logical mistakes.",
+        "tools": [
+            {
+                "name": "fetch_trade_performance",
+                "description": "Fetches cumulative simulated paper trading stats.",
+            }
+        ],
+    },
+    "SupervisorAgent": {
+        "goal": "Oversee the entire Crew, check agent health logs, diagnose stuck node systems, apply constructive teaching feedback, and notify Telegram.",
+        "backstory": "You are the Head Supervisor Agent, equipped with LLM reasoning. You check agent health monitors and restart any nodes in error state. You audit trades and write constructive teacher feedback to guide agents to improve. You compile the daily execution report and publish notifications to the Telegram channel.",
+        "tools": [
+            {
+                "name": "check_agent_health",
+                "description": "Queries registry database to check status of agent nodes.",
+            },
+            {
+                "name": "restart_agent_node",
+                "description": "Resets error flag and restarts a stalled agent node.",
+            },
+            {
+                "name": "record_teacher_feedback",
+                "description": "Records supervisor notes on trade signals for future improvement.",
+            },
+            {
+                "name": "fetch_trade_performance",
+                "description": "Fetches cumulative simulated paper trading stats.",
+            },
+            {
+                "name": "send_telegram_notification",
+                "description": "Publishes reports and status alerts to the Telegram bot channel.",
+            },
+        ],
+    },
+}
+
+
+@app.get("/api/agents/{name}")
+def get_agent_details(name: str):
+    filters = {"name": name}
+    agents = db_service.select("agent_registry", filters)
+    if not agents:
+        raise HTTPException(status_code=404, detail="Agent registry node not found.")
+
+    agent = agents[0]
+    metadata = AGENT_STATIC_METADATA.get(
+        name, {"goal": "", "backstory": "", "tools": []}
+    )
+
+    # Query latest audit logs for this agent
+    all_logs = db_service.select("audit_log")
+    agent_logs = [log for log in all_logs if log.get("agent_name") == name]
+    # Sort by created_at desc and take latest 10
+    agent_logs = sorted(
+        agent_logs, key=lambda x: x.get("created_at", ""), reverse=True
+    )[:10]
+
+    # Combine data
+    response_data = {
+        "id": agent.get("id"),
+        "name": agent.get("name"),
+        "role": agent.get("role"),
+        "status": agent.get("status"),
+        "last_heartbeat": agent.get("last_heartbeat"),
+        "avg_response_time_ms": agent.get("avg_response_time_ms"),
+        "accuracy_score": agent.get("accuracy_score"),
+        "total_tasks_completed": agent.get("total_tasks_completed"),
+        "total_errors": agent.get("total_errors"),
+        "lessons_learned": agent.get("lessons_learned", []),
+        "goal": metadata["goal"],
+        "backstory": metadata["backstory"],
+        "tools": metadata["tools"],
+        "audit_logs": agent_logs,
+    }
+
+    return response_data
+
+
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)

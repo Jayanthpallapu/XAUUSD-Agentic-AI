@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   TrendingUp, RefreshCw, AlertTriangle, Activity,
-  Cpu, Award, ShieldAlert, BookOpen, CheckCircle, Database
+  Cpu, Award, ShieldAlert, BookOpen, CheckCircle, Database,
+  X, Terminal
 } from "lucide-react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -105,6 +106,10 @@ export default function Dashboard() {
   const [backendOnline, setBackendOnline] = useState(true);
   const [currentTime, setCurrentTime] = useState(null);
   const [agentActive, setAgentActive] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [agentDetailOpen, setAgentDetailOpen] = useState(false);
+  const [loadingAgentDetail, setLoadingAgentDetail] = useState(false);
+  const [expandedLog, setExpandedLog] = useState(null);
   const logsEndRef = useRef(null);
   const isMounted = useRef(true);
 
@@ -309,6 +314,10 @@ export default function Dashboard() {
       const res = await fetch(`${API_BASE_URL}/api/agents/${name}/restart`, { method: "POST" });
       if (res.ok) {
         setLogs(prev => [...prev, `SupervisorAgent: Node '${name}' reset successfully.`]);
+        if (selectedAgent && selectedAgent.name === name) {
+          handleAgentClick(name);
+        }
+        fetchDashboardAndStatus();
       }
     } catch (err) {
       setLogs(prev => [...prev, `SupervisorAgent [Demo Mode]: Successfully reset agent '${name}' status and cleared errors.`]);
@@ -316,6 +325,43 @@ export default function Dashboard() {
         ...prev,
         agents: prev.agents.map(ag => ag.name === name ? { ...ag, status: "active", total_errors: 0 } : ag)
       }));
+      if (selectedAgent && selectedAgent.name === name) {
+        setSelectedAgent(prev => prev ? { ...prev, status: "active", total_errors: 0 } : null);
+      }
+    }
+  };
+
+  const handleAgentClick = async (agentName) => {
+    setLoadingAgentDetail(true);
+    setAgentDetailOpen(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/agents/${agentName}`);
+      if (res.ok) {
+        const agentData = await res.json();
+        setSelectedAgent(agentData);
+      } else {
+        console.error("Failed to fetch agent details");
+        const basicAgent = data.agents.find(a => a.name === agentName);
+        setSelectedAgent(basicAgent ? {
+          ...basicAgent,
+          goal: "Goal detail currently unavailable in offline/demo mode.",
+          backstory: "Backstory detail currently unavailable in offline/demo mode.",
+          tools: [],
+          audit_logs: []
+        } : null);
+      }
+    } catch (err) {
+      console.error("Error fetching agent details:", err);
+      const basicAgent = data.agents.find(a => a.name === agentName);
+      setSelectedAgent(basicAgent ? {
+        ...basicAgent,
+        goal: "Goal detail currently unavailable in offline/demo mode.",
+        backstory: "Backstory detail currently unavailable in offline/demo mode.",
+        tools: [],
+        audit_logs: []
+      } : null);
+    } finally {
+      setLoadingAgentDetail(false);
     }
   };
 
@@ -536,7 +582,11 @@ export default function Dashboard() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   {data.agents.map((agent, i) => (
-                    <div key={agent.name || i} className="bg-gradient-to-b from-[#141724] to-[#11131e] border border-slate-800/80 p-5 rounded-xl relative hover:border-slate-700 transition-all">
+                    <div 
+                      key={agent.name || i} 
+                      onClick={() => handleAgentClick(agent.name)}
+                      className="bg-gradient-to-b from-[#141724] to-[#11131e] border border-slate-800/80 p-5 rounded-xl relative hover:border-amber-500/40 cursor-pointer hover:scale-[1.02] shadow-lg hover:shadow-amber-500/5 transition-all duration-300"
+                    >
                       <div className="flex justify-between items-start">
                         <div>
                           <h3 className="font-bold text-xs text-slate-200">{agent.name}</h3>
@@ -560,7 +610,10 @@ export default function Dashboard() {
                           <h4 className="text-xs font-bold text-red-400">Node Failure Detected</h4>
                           <button
                             id={`btn-restart-${agent.name}`}
-                            onClick={() => restartAgent(agent.name)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              restartAgent(agent.name);
+                            }}
                             className="mt-3 bg-red-500/10 border border-red-500/40 text-red-400 hover:bg-red-500/20 text-[10px] font-bold px-3 py-1 rounded transition-all"
                           >
                             RESTART NODE
@@ -834,6 +887,200 @@ export default function Dashboard() {
 
         </div>
       </main>
+
+      {/* AGENT DETAIL DRAWER */}
+      {agentDetailOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          {/* Backdrop Blur */}
+          <div 
+            onClick={() => setAgentDetailOpen(false)}
+            className="absolute inset-0 bg-[#06070a]/70 backdrop-blur-sm transition-opacity"
+          />
+
+          {/* Drawer content */}
+          <div className="relative w-full md:w-[600px] h-full bg-[#0c0d16] border-l border-slate-800 shadow-2xl flex flex-col z-10 transition-transform duration-300 transform translate-x-0">
+            {/* Header */}
+            <div className="flex justify-between items-center p-6 border-b border-slate-800 bg-[#0f101d]">
+              <div className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-bold text-slate-100">{selectedAgent ? selectedAgent.name : "Loading Agent..."}</h2>
+                  {selectedAgent && (
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase tracking-wider ${selectedAgent.status === "active" ? "bg-green-500/10 text-green-400 animate-pulse" : "bg-red-500/10 text-red-400 font-semibold"}`}>
+                      {selectedAgent.status}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 font-mono">{selectedAgent ? selectedAgent.role : ""}</p>
+              </div>
+              <button 
+                onClick={() => setAgentDetailOpen(false)}
+                className="p-1 rounded-lg bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div className="flex-1 p-6 overflow-y-auto space-y-6">
+              {loadingAgentDetail ? (
+                <div className="flex flex-col items-center justify-center h-64 space-y-3">
+                  <RefreshCw className="w-8 h-8 text-amber-500 animate-spin" />
+                  <span className="text-xs text-slate-400 font-mono">Syncing real-time agent metrics...</span>
+                </div>
+              ) : selectedAgent ? (
+                <>
+                  {/* Status Grid Cards */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-[#131523] border border-slate-800 p-4 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase">Tasks Completed</span>
+                      <p className="text-xl font-bold text-slate-100">{selectedAgent.total_tasks_completed}</p>
+                    </div>
+                    <div className="bg-[#131523] border border-slate-800 p-4 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase">Total Errors</span>
+                      <p className={`text-xl font-bold ${selectedAgent.total_errors > 0 ? "text-red-400" : "text-slate-100"}`}>{selectedAgent.total_errors}</p>
+                    </div>
+                    <div className="bg-[#131523] border border-slate-800 p-4 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase">Response Time</span>
+                      <p className="text-xl font-bold text-slate-100">{selectedAgent.avg_response_time_ms ? `${Number(selectedAgent.avg_response_time_ms).toFixed(0)}ms` : "N/A"}</p>
+                    </div>
+                    <div className="bg-[#131523] border border-slate-800 p-4 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase">Accuracy Rating</span>
+                      <p className="text-xl font-bold text-amber-400">{(selectedAgent.accuracy_score * 100).toFixed(0)}%</p>
+                    </div>
+                  </div>
+
+                  {/* Goal Card */}
+                  <div className="bg-[#10121d] border border-slate-800/80 p-5 rounded-xl space-y-2">
+                    <h3 className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Agent Core Goal</h3>
+                    <p className="text-xs text-slate-300 leading-relaxed font-sans">{selectedAgent.goal}</p>
+                  </div>
+
+                  {/* Backstory Card */}
+                  <div className="bg-[#10121d] border border-slate-800/80 p-5 rounded-xl space-y-2">
+                    <h3 className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Agent Backstory</h3>
+                    <p className="text-xs text-slate-400 leading-relaxed font-sans">{selectedAgent.backstory}</p>
+                  </div>
+
+                  {/* Registered Tools */}
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-amber-500" /> Active Capabilities (MCP Tools)
+                    </h3>
+                    {selectedAgent.tools && selectedAgent.tools.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-2">
+                        {selectedAgent.tools.map((tool, idx) => (
+                          <div key={idx} className="bg-[#0f111c] border border-slate-800 p-3 rounded-lg flex items-start gap-2.5">
+                            <span className="mt-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-[9px] font-mono text-amber-400">TOOL</span>
+                            <div className="space-y-0.5">
+                              <p className="text-[11px] font-bold text-slate-200 font-mono">{tool.name}</p>
+                              <p className="text-[10px] text-slate-400 font-sans leading-normal">{tool.description}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 font-mono italic">No native tools registered to this node.</p>
+                    )}
+                  </div>
+
+                  {/* Lessons Learned */}
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 text-amber-400" /> Lesson Bank (Mistake Correction Loop)
+                    </h3>
+                    {selectedAgent.lessons_learned && selectedAgent.lessons_learned.length > 0 ? (
+                      <div className="space-y-3 font-mono text-xs border-l border-slate-800 pl-4">
+                        {selectedAgent.lessons_learned.map((lesson, idx) => (
+                          <div key={idx} className="relative space-y-1 pb-3">
+                            <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-amber-500 border border-slate-900" />
+                            <div className="flex justify-between items-center text-[10px] text-slate-500">
+                              <span>LESSON #{idx + 1}</span>
+                              <span>{lesson.timestamp ? new Date(lesson.timestamp).toLocaleString() : "Recent"}</span>
+                            </div>
+                            <p className="text-slate-300"><span className="text-slate-500">Mistake:</span> {lesson.mistake}</p>
+                            <p className="text-slate-400"><span className="text-slate-500">Correction:</span> {lesson.correction}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 font-mono italic">No lessons registered in this agent&apos;s database memory yet.</p>
+                    )}
+                  </div>
+
+                  {/* Recent Audit Logs */}
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                      <Terminal className="w-4 h-4 text-amber-500" /> Node Trace Audit Logs
+                    </h3>
+                    {selectedAgent.audit_logs && selectedAgent.audit_logs.length > 0 ? (
+                      <div className="space-y-2.5 font-mono text-xs">
+                        {selectedAgent.audit_logs.map((log, idx) => {
+                          const isExpanded = expandedLog === log.id;
+                          return (
+                            <div key={log.id || idx} className="bg-[#0f111c] border border-slate-800 rounded-lg p-3 space-y-2">
+                              <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${log.status === "success" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                                    {log.action}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500">{log.duration_ms ? `${log.duration_ms.toFixed(0)}ms` : ""}</span>
+                                </div>
+                                <span className="text-[9px] text-slate-500">{log.created_at ? new Date(log.created_at).toLocaleTimeString() : ""}</span>
+                              </div>
+                              {log.error_message && (
+                                <p className="text-red-400 text-[10px] bg-red-950/20 p-2 rounded border border-red-900/40">{log.error_message}</p>
+                              )}
+                              {log.output_data && (
+                                <div>
+                                  <button
+                                    onClick={() => setExpandedLog(isExpanded ? null : log.id)}
+                                    className="text-[9px] text-slate-400 hover:text-slate-200 underline"
+                                  >
+                                    {isExpanded ? "Hide Trace Data" : "Show Trace Data"}
+                                  </button>
+                                  {isExpanded && (
+                                    <pre className="mt-2 p-3 bg-black/40 text-[9px] text-slate-400 rounded overflow-x-auto max-h-40 leading-relaxed">
+                                      {JSON.stringify({ input: log.input_data, output: log.output_data }, null, 2)}
+                                    </pre>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 font-mono italic">No recent execution logs found for this node.</p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="py-12 text-center text-xs text-slate-500 font-mono">
+                  Agent details failed to load.
+                </div>
+              )}
+            </div>
+
+            {/* Footer restart panel */}
+            {selectedAgent && (
+              <div className="p-6 border-t border-slate-800 bg-[#0f101d] flex gap-3">
+                <button
+                  onClick={() => restartAgent(selectedAgent.name)}
+                  className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/40 text-xs font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" /> RESTART NODE DIAGNOSTIC
+                </button>
+                <button
+                  onClick={() => setAgentDetailOpen(false)}
+                  className="px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors"
+                >
+                  CLOSE
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );
