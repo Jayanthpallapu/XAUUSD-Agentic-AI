@@ -162,6 +162,9 @@ export default function Dashboard() {
           if (isMounted.current) {
             setData(apiData);
             setBackendOnline(true);
+            if (apiData.gold_price) {
+              setGoldPrice(apiData.gold_price);
+            }
           }
         } else {
           if (isMounted.current) setBackendOnline(false);

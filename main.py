@@ -376,7 +376,22 @@ def get_dashboard():
         notifications, key=lambda x: x.get("created_at", ""), reverse=True
     )[:10]
 
+    # Fetch real-time gold price for frontend sync
+    gold_price = 2645.50  # Fallback mock price
+    try:
+        from tools.definitions.market_data import fetch_gold_price
+
+        gold_price_str = fetch_gold_price.func()
+        import re
+
+        match = re.search(r"\$(\d+(?:\.\d+)?)\s*USD", gold_price_str)
+        if match:
+            gold_price = float(match.group(1))
+    except Exception as e:
+        logger.error(f"Failed to fetch gold price for dashboard: {e}")
+
     return {
+        "gold_price": gold_price,
         "agents": agents,
         "metrics": {
             "win_rate": win_rate,

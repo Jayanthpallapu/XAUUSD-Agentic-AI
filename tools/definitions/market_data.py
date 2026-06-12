@@ -33,8 +33,7 @@ def fetch_gold_price() -> str:
     if YFINANCE_AVAILABLE:
         try:
             ticker = yf.Ticker("GC=F")
-            info = ticker.fast_info
-            price = info.get("last_price")
+            price = ticker.fast_info.last_price
             if price:
                 return f"Gold (XAU/USD) Futures Price: ${price:.2f} USD (via yfinance ticker GC=F)"
         except Exception as e:
@@ -133,7 +132,7 @@ def fetch_commodities_prices() -> str:
         for name, ticker_sym in tickers.items():
             try:
                 ticker = yf.Ticker(ticker_sym)
-                price = ticker.fast_info.get("last_price")
+                price = ticker.fast_info.last_price
                 if price:
                     results.append(f"{name}: ${price:.2f}")
             except Exception as e:
@@ -173,7 +172,7 @@ def fetch_crypto_prices() -> str:
     if YFINANCE_AVAILABLE:
         try:
             ticker = yf.Ticker("BTC-USD")
-            price = ticker.fast_info.get("last_price")
+            price = ticker.fast_info.last_price
             if price:
                 return f"Bitcoin (BTC/USD) Price: ${price:,.2f} USD (via yfinance)"
         except Exception as e:
@@ -196,7 +195,7 @@ def fetch_market_indices() -> str:
         for name, ticker_sym in tickers.items():
             try:
                 ticker = yf.Ticker(ticker_sym)
-                price = ticker.fast_info.get("last_price")
+                price = ticker.fast_info.last_price
                 if price:
                     results.append(f"{name}: {price:.2f}")
             except Exception as e:
@@ -226,9 +225,9 @@ def fetch_treasury_yields() -> str:
     if YFINANCE_AVAILABLE:
         try:
             ticker = yf.Ticker("^TNX")
-            price = ticker.fast_info.get("last_price")
+            price = ticker.fast_info.last_price
             if price:
-                yield_val = price / 10.0
+                yield_val = price / 10.0 if price > 15.0 else price
                 return f"US 10-Year Treasury Yield: {yield_val:.3f}% (via yfinance ticker ^TNX)"
         except Exception as e:
             logger.error(f"yfinance yield fetch failed: {e}")

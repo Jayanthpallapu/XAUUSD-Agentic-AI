@@ -39,7 +39,7 @@ class FlowManager:
         """
         closed_signals = []
         try:
-            gold_str = fetch_gold_price()
+            gold_str = fetch_gold_price.func()
             match = re.search(r"\$(\d+(?:\.\d+)?)\s*USD", gold_str)
             if not match:
                 match = re.search(r"\$(\d+(?:\.\d+)?)\s*Futures", gold_str)
@@ -286,9 +286,9 @@ class FlowManager:
             from tools.definitions.news_calendar import fetch_economic_calendar
             from tools.definitions.system import send_telegram_notification
 
-            gold_price = fetch_gold_price()
-            indices = fetch_market_indices()
-            calendar = fetch_economic_calendar()
+            gold_price = fetch_gold_price.func()
+            indices = fetch_market_indices.func()
+            calendar = fetch_economic_calendar.func()
             mem_stats = hermes_memory.get_stats()
             total_lessons = mem_stats.get("total_lessons", 0)
 
@@ -309,7 +309,7 @@ class FlowManager:
                 f"Use /cycle to start analysis or /positions to view open trades."
             )
 
-            send_telegram_notification(
+            send_telegram_notification.func(
                 title="Morning Market Briefing",
                 message=briefing,
                 level="info",
