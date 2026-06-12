@@ -12,3 +12,5 @@ services:
         value: "3.11"
       - key: OPENROUTER_API_KEY
         sync: false
+      - key: GROQ_API_KEY
+        sync: false

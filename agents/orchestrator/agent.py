@@ -174,10 +174,17 @@ def get_llm(model_name: str = None) -> LLM:
             logger.warning("Groq LLaMA-3.3-70B failed verification. Trying fallback.")
 
     # Final fallback: Groq lightweight model
+    if not settings.GROQ_API_KEY:
+        raise ValueError(
+            "API Configuration Error: Both OpenRouter and Groq API keys are invalid or missing. "
+            "Please configure your OPENROUTER_API_KEY (daily budget limit might be exceeded) "
+            "and ensure GROQ_API_KEY is configured in your Render dashboard environment variables."
+        )
+
     logger.warning("LLM: Using Groq LLaMA-3.1-8B-Instant (emergency fallback).")
     llm = LLM(
         model="groq/llama-3.1-8b-instant",
-        api_key=settings.GROQ_API_KEY or "gsk_mock_key_for_offline_runs",
+        api_key=settings.GROQ_API_KEY,
     )
     _cached_llm = llm
     _cached_llm_time = current_time
