@@ -19,6 +19,8 @@ from tools.definitions.trading_performance import (
     execute_paper_trade,
     fetch_trade_performance,
     record_teacher_feedback,
+    save_trade_journal,
+    fetch_closed_trades,
 )
 from tools.definitions.system import (
     check_agent_health,
@@ -145,6 +147,22 @@ def mcp_fetch_trade_performance() -> str:
 )
 def mcp_record_teacher_feedback(trade_id: str, notes: str) -> str:
     return record_teacher_feedback(trade_id=trade_id, notes=notes)
+
+
+@mcp.tool(
+    name="save_trade_journal",
+    description="Saves and locks an executed trade in the immutable journal.",
+)
+def mcp_save_trade_journal(trade_data: str) -> str:
+    return save_trade_journal(trade_data=trade_data)
+
+
+@mcp.tool(
+    name="fetch_closed_trades",
+    description="Fetches recently closed trades from the trade journal.",
+)
+def mcp_fetch_closed_trades(limit: int = 10) -> str:
+    return fetch_closed_trades(limit=limit)
 
 
 # 4. System Administration Tools

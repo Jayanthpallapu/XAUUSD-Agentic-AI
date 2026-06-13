@@ -68,11 +68,12 @@ def fetch_news_rss(query: str = "gold price XAUUSD forex") -> str:
             elif bear_count > bull_count:
                 sentiment = "Bearish"
 
+            short_link = link[:100] + "..." if len(link) > 100 else link
             items.append(
                 f"{i + 1}. [{source}] {title}\n"
                 f"   Published: {published}\n"
                 f"   Estimated Local Sentiment: {sentiment}\n"
-                f"   Link: {link}"
+                f"   Link: {short_link}"
             )
 
         return f"Latest News for '{query}':\n\n" + "\n\n".join(items)

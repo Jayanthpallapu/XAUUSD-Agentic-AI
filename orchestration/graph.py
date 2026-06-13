@@ -33,8 +33,8 @@ class FlowManager:
     @staticmethod
     def check_and_close_trades() -> List[Dict[str, Any]]:
         """
-        Fetches all active paper trades, retrieves the current spot gold price,
-        and determines if the trades should be closed out via SL or TP.
+        Fetches all active paper trades from both trade_journal and legacy trade_signals tables,
+        retrieves the current spot gold price, and determines if the trades should be closed out via SL or TP.
         Auto-saves SL hits to Hermes memory as TradingAgent lessons.
         """
         closed_signals = []
@@ -57,88 +57,108 @@ class FlowManager:
                 f"Checking open positions against current spot price: ${current_price:.2f}"
             )
 
-            active_trades = db_service.select("trade_signals", {"status": "active"})
-            for trade in active_trades:
-                trade_id = trade["id"]
-                direction = trade["direction"]
-                entry = float(trade["entry_price"])
-                sl = float(trade["stop_loss"])
-                tp = float(trade["take_profit"])
+            # Check new trade journal positions
+            active_journal = db_service.select("trade_journal", {"status": "active"})
+            # Check legacy trade signals positions
+            active_legacy = db_service.select("trade_signals", {"status": "active"})
 
-                lot_size = 0.5
-                multiplier = lot_size * 100
+            targets = [
+                (active_journal, "trade_journal", "trade_id"),
+                (active_legacy, "trade_signals", "id"),
+            ]
 
-                closed = False
-                status = "active"
-                close_price = None
-                pnl_pips = 0.0
-                pnl_usd = 0.0
-
-                if direction == "BUY":
-                    if current_price <= sl:
-                        closed = True
-                        status = "closed_loss"
-                        close_price = sl
-                        pnl_pips = (sl - entry) * 10
-                        pnl_usd = (sl - entry) * multiplier
-                    elif current_price >= tp:
-                        closed = True
-                        status = "closed_win"
-                        close_price = tp
-                        pnl_pips = (tp - entry) * 10
-                        pnl_usd = (tp - entry) * multiplier
-
-                elif direction == "SELL":
-                    if current_price >= sl:
-                        closed = True
-                        status = "closed_loss"
-                        close_price = sl
-                        pnl_pips = (entry - sl) * 10
-                        pnl_usd = (entry - sl) * multiplier
-                    elif current_price <= tp:
-                        closed = True
-                        status = "closed_win"
-                        close_price = tp
-                        pnl_pips = (entry - tp) * 10
-                        pnl_usd = (entry - tp) * multiplier
-
-                if closed:
-                    update_data = {
-                        "status": status,
-                        "close_price": close_price,
-                        "pnl_pips": pnl_pips,
-                        "pnl_usd": pnl_usd,
-                        "closed_at": datetime.utcnow().isoformat(),
-                    }
-                    db_service.update("trade_signals", {"id": trade_id}, update_data)
-                    logger.info(
-                        f"Closed Trade {trade_id[:8]} ({direction}) as {status.upper()} at price: ${close_price:.2f}. PnL: ${pnl_usd:.2f}"
+            for active_list, table_name, id_field in targets:
+                for trade in active_list:
+                    # Resolve ID
+                    trade_id = (
+                        trade.get(id_field) or trade.get("id") or trade.get("trade_id")
                     )
-                    closed_signals.append({**trade, **update_data})
+                    if not trade_id:
+                        continue
 
-                    # === HERMES MEMORY: Auto-save SL hit lessons ===
-                    if status == "closed_loss":
-                        hermes_memory.save_lesson(
-                            agent_name="TradingAgent",
-                            mistake=(
-                                f"{direction} trade entered at ${entry:.2f} hit Stop Loss at ${sl:.2f}. "
-                                f"PnL: ${pnl_usd:.2f} USD."
-                            ),
-                            correction=(
-                                "Review correlation confluence and news sentiment before entry. "
-                                "Ensure DXY trend direction aligns with Gold direction."
-                            ),
-                            lesson=(
-                                f"Stop Loss triggered on {direction} at ${entry:.2f}. "
-                                f"Loss of ${abs(pnl_usd):.2f}. "
-                                f"Investigate macro context before next entry in same direction."
-                            ),
-                            context=f"Gold price at SL: ${current_price:.2f}",
-                            outcome="loss",
-                        )
+                    direction = trade["direction"]
+                    entry = float(trade["entry_price"])
+                    sl = float(trade["stop_loss"])
+                    tp = float(
+                        trade.get("take_profit_1") or trade.get("take_profit") or 0.0
+                    )
+
+                    lot_size = float(trade.get("lot_size", 0.5))
+                    multiplier = lot_size * 100
+
+                    closed = False
+                    status = "active"
+                    close_price = None
+                    pnl_pips = 0.0
+                    pnl_usd = 0.0
+
+                    if direction == "BUY":
+                        if current_price <= sl:
+                            closed = True
+                            status = "closed_loss"
+                            close_price = sl
+                            pnl_pips = (sl - entry) * 10
+                            pnl_usd = (sl - entry) * multiplier
+                        elif current_price >= tp and tp > 0.0:
+                            closed = True
+                            status = "closed_win"
+                            close_price = tp
+                            pnl_pips = (tp - entry) * 10
+                            pnl_usd = (tp - entry) * multiplier
+
+                    elif direction == "SELL":
+                        if current_price >= sl:
+                            closed = True
+                            status = "closed_loss"
+                            close_price = sl
+                            pnl_pips = (entry - sl) * 10
+                            pnl_usd = (entry - sl) * multiplier
+                        elif current_price <= tp and tp > 0.0:
+                            closed = True
+                            status = "closed_win"
+                            close_price = tp
+                            pnl_pips = (entry - tp) * 10
+                            pnl_usd = (entry - tp) * multiplier
+
+                    if closed:
+                        update_data = {
+                            "status": status,
+                            "close_price": close_price,
+                            "pnl_pips": pnl_pips,
+                            "pnl_usd": pnl_usd,
+                            "closed_at": datetime.utcnow().isoformat(),
+                        }
+                        db_service.update(table_name, {id_field: trade_id}, update_data)
                         logger.info(
-                            f"Hermes memory: SL lesson saved for Trade {trade_id[:8]}"
+                            f"Closed Trade {trade_id[:8]} in {table_name} ({direction}) as {status.upper()} at price: ${close_price:.2f}. PnL: ${pnl_usd:.2f}"
                         )
+                        closed_signals.append(
+                            {**trade, **update_data, "table_name": table_name}
+                        )
+
+                        # === HERMES MEMORY: Auto-save SL hit lessons ===
+                        if status == "closed_loss":
+                            hermes_memory.save_lesson(
+                                agent_name="TradingAgent",
+                                mistake=(
+                                    f"{direction} trade entered at ${entry:.2f} hit Stop Loss at ${sl:.2f}. "
+                                    f"PnL: ${pnl_usd:.2f} USD."
+                                ),
+                                correction=(
+                                    "Review correlation confluence and news sentiment before entry. "
+                                    "Ensure DXY trend direction aligns with Gold direction."
+                                ),
+                                lesson=(
+                                    f"Stop Loss triggered on {direction} at ${entry:.2f}. "
+                                    f"Loss of ${abs(pnl_usd):.2f}. "
+                                    f"Investigate macro context before next entry in same direction."
+                                ),
+                                context=f"Gold price at SL: ${current_price:.2f}",
+                                outcome="loss",
+                            )
+                            logger.info(
+                                f"Hermes memory: SL lesson saved for Trade {trade_id[:8]}"
+                            )
 
         except Exception as e:
             logger.error(f"Error checking and closing trades: {e}")

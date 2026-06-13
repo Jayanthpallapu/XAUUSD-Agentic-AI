@@ -322,3 +322,208 @@ def fetch_alpha_vantage_sentiment() -> str:
     except Exception as e:
         logger.error(f"Alpha Vantage sentiment failed: {e}")
         return f"Alpha Vantage error: {str(e)}"
+
+
+def map_symbol(symbol: str, target: str = "yfinance") -> str:
+    symbol = symbol.upper().replace("/", "").replace(" ", "")
+    if target == "yfinance":
+        if symbol in ["XAUUSD", "GOLD", "GC=F"]:
+            return "GC=F"
+        elif symbol in ["EURUSD", "EUR/USD"]:
+            return "EURUSD=X"
+        elif symbol in ["GBPUSD", "GBP/USD"]:
+            return "GBPUSD=X"
+        elif symbol in ["USDJPY", "USD/JPY"]:
+            return "JPY=X"
+        elif symbol in ["DXY", "DX-Y.NYB"]:
+            return "DX-Y.NYB"
+        elif symbol in ["US10Y", "^TNX"]:
+            return "^TNX"
+    elif target == "twelvedata":
+        if symbol in ["XAUUSD", "GOLD", "GC=F"]:
+            return "XAU/USD"
+        elif len(symbol) == 6:
+            return f"{symbol[:3]}/{symbol[3:]}"
+    return symbol
+
+
+@tool
+def fetch_ohlcv_data(
+    symbol: str = "XAU/USD", interval: str = "1D", timeframe: str = "", bars: int = 100
+) -> str:
+    """
+    Fetches OHLCV candlestick data for any timeframe (1W, 1D, 4H, 1H, 15M, 5M) for analysis.
+    Returns a JSON string of a list of candle dicts sorted ascending by datetime.
+    """
+    import json
+    import pandas as pd
+
+    interval_upper = (
+        timeframe.upper().strip() if timeframe else interval.upper().strip()
+    )
+
+    # Try Twelve Data first if key is configured
+    twelve_key = getattr(settings, "TWELVE_DATA_API_KEY", "")
+    if twelve_key and "your_twelve" not in twelve_key.lower():
+        twelve_intervals = {
+            "1W": "1week",
+            "1D": "1day",
+            "4H": "4h",
+            "1H": "1h",
+            "15M": "15min",
+            "5M": "5min",
+        }
+        twelve_interval = twelve_intervals.get(interval_upper)
+        if twelve_interval:
+            twelve_symbol = map_symbol(symbol, target="twelvedata")
+            try:
+                url = f"https://api.twelvedata.com/time_series?symbol={twelve_symbol}&interval={twelve_interval}&outputsize={bars}&apikey={twelve_key}"
+                res = requests.get(url, timeout=10)
+                data = res.json()
+                if "values" in data:
+                    candles = []
+                    for val in reversed(data["values"]):
+                        candles.append(
+                            {
+                                "datetime": val["datetime"],
+                                "open": float(val["open"]),
+                                "high": float(val["high"]),
+                                "low": float(val["low"]),
+                                "close": float(val["close"]),
+                                "volume": int(val.get("volume", 0))
+                                if val.get("volume")
+                                else 0,
+                            }
+                        )
+                    return json.dumps(candles)
+                else:
+                    logger.warning(
+                        f"Twelve Data returned no values for {twelve_symbol}: {data}"
+                    )
+            except Exception as e:
+                logger.error(f"Twelve Data OHLCV fetch failed: {e}")
+
+    # Fallback/Primary: yfinance
+    if YFINANCE_AVAILABLE:
+        yf_symbol = map_symbol(symbol, target="yfinance")
+        try:
+            yf_intervals = {
+                "1W": ("1wk", "5y"),
+                "1D": ("1d", "1y"),
+                "4H": ("1h", "60d"),
+                "1H": ("1h", "60d"),
+                "15M": ("15m", "14d"),
+                "5M": ("5m", "7d"),
+            }
+            if interval_upper not in yf_intervals:
+                return json.dumps({"error": f"Unsupported interval: {interval}"})
+
+            yf_int, yf_period = yf_intervals[interval_upper]
+            ticker = yf.Ticker(yf_symbol)
+            df = ticker.history(interval=yf_int, period=yf_period)
+            if df.empty:
+                return json.dumps(
+                    {"error": f"No data returned from yfinance for {yf_symbol}"}
+                )
+
+            if interval_upper == "4H":
+                df_resampled = (
+                    df.resample("4h")
+                    .agg(
+                        {
+                            "Open": "first",
+                            "High": "max",
+                            "Low": "min",
+                            "Close": "last",
+                            "Volume": "sum",
+                        }
+                    )
+                    .dropna()
+                )
+                df = df_resampled
+
+            df = df.reset_index()
+            dt_col = None
+            for col in ["Date", "Datetime", "date", "datetime"]:
+                if col in df.columns:
+                    dt_col = col
+                    break
+            if not dt_col:
+                return json.dumps(
+                    {
+                        "error": "Could not identify datetime column in yfinance DataFrame"
+                    }
+                )
+
+            if pd.api.types.is_datetime64_any_dtype(df[dt_col]):
+                df["formatted_dt"] = df[dt_col].dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                df["formatted_dt"] = df[dt_col].astype(str)
+
+            df = df.tail(bars)
+            candles = []
+            for _, row in df.iterrows():
+                candles.append(
+                    {
+                        "datetime": row["formatted_dt"],
+                        "open": float(row["Open"]),
+                        "high": float(row["High"]),
+                        "low": float(row["Low"]),
+                        "close": float(row["Close"]),
+                        "volume": int(row["Volume"])
+                        if not pd.isna(row["Volume"])
+                        else 0,
+                    }
+                )
+            return json.dumps(candles)
+        except Exception as e:
+            logger.error(f"yfinance OHLCV fetch failed: {e}")
+            return json.dumps({"error": f"Failed to fetch OHLCV: {str(e)}"})
+
+    return json.dumps({"error": "No data source available"})
+
+
+@tool
+def fetch_dxy_and_yields() -> str:
+    """
+    Fetches the current real-time or near-real-time levels for the US Dollar Index (DXY)
+    and the US 10-Year Treasury Bond yield.
+    """
+    dxy_val = "N/A"
+    yield_val = "N/A"
+
+    if YFINANCE_AVAILABLE:
+        try:
+            ticker = yf.Ticker("DX-Y.NYB")
+            price = ticker.fast_info.last_price
+            if price:
+                dxy_val = f"{price:.2f}"
+        except Exception as e:
+            logger.error(f"yfinance DXY fetch failed: {e}")
+
+    if settings.FRED_API_KEY:
+        try:
+            url10 = f"https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&limit=1&sort_order=desc&file_type=json&api_key={settings.FRED_API_KEY}"
+            r10 = requests.get(url10, timeout=10).json()
+            y10 = r10.get("observations", [{}])[0].get("value", "N/A")
+            if y10 != "N/A":
+                yield_val = f"{float(y10):.3f}%"
+        except Exception as e:
+            logger.error(f"FRED API yields fetch failed: {e}")
+
+    if yield_val == "N/A" and YFINANCE_AVAILABLE:
+        try:
+            ticker = yf.Ticker("^TNX")
+            price = ticker.fast_info.last_price
+            if price:
+                val = price / 10.0 if price > 15.0 else price
+                yield_val = f"{val:.3f}%"
+        except Exception as e:
+            logger.error(f"yfinance yield fetch failed: {e}")
+
+    if dxy_val == "N/A":
+        dxy_val = "104.50 (Mock)"
+    if yield_val == "N/A":
+        yield_val = "4.425% (Mock)"
+
+    return f"US Dollar Index (DXY): {dxy_val} | US 10-Year Treasury Yield: {yield_val}"

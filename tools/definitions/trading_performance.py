@@ -202,3 +202,63 @@ def record_teacher_feedback(trade_id: str, notes: str) -> str:
     except Exception as e:
         logger.error(f"Error saving teacher feedback: {e}")
         return f"Error saving feedback: {str(e)}"
+
+
+@tool
+def save_trade_journal(trade_data: str) -> str:
+    """
+    Saves an executed trade into the trade_journal table.
+    The record is marked with an immutable locked flag (locked=True).
+    Input trade_data should be a JSON string of trade details.
+    """
+    import json
+
+    try:
+        if isinstance(trade_data, str):
+            data = json.loads(trade_data)
+        else:
+            data = trade_data
+
+        if not isinstance(data, dict):
+            return "Failed to save trade journal: Input must be a valid dictionary or JSON object."
+
+        data["locked"] = True
+        if "id" not in data and "trade_id" in data:
+            data["id"] = data["trade_id"]
+        if "id" not in data:
+            data["id"] = str(uuid.uuid4())
+
+        db_service.insert("trade_journal", data)
+        return f"Successfully saved and locked trade in journal: Trade ID {data['id']}"
+    except Exception as e:
+        logger.error(f"Failed to save trade journal: {e}")
+        return f"Failed to save trade journal: {str(e)}"
+
+
+@tool
+def fetch_closed_trades(limit: int = 10) -> str:
+    """
+    Fetches the history of recently closed trades from the trade_journal table.
+    """
+    import json
+
+    try:
+        trades = db_service.select("trade_journal")
+        if not trades:
+            return "No trades found in the trade journal."
+
+        closed = [
+            t
+            for t in trades
+            if t.get("status") in ["closed", "closed_win", "closed_loss"]
+        ]
+        closed.sort(
+            key=lambda x: x.get("closed_at", "") or x.get("opened_at", "") or "",
+            reverse=True,
+        )
+        recent = closed[:limit]
+
+        return json.dumps(recent)
+    except Exception as e:
+        logger.error(f"Failed to fetch closed trades: {e}")
+        return f"Failed to fetch closed trades: {str(e)}"

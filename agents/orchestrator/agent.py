@@ -127,6 +127,7 @@ def get_llm() -> ChatOpenAI:
                     api_key=settings.OPENROUTER_API_KEY,
                     base_url="https://openrouter.ai/api/v1",
                     temperature=0.15,
+                    max_tokens=4096,
                 )
                 logger.info("LLM: Using Hermes 3 405B via OpenRouter (primary).")
                 _cached_llm = llm
@@ -146,6 +147,7 @@ def get_llm() -> ChatOpenAI:
                     api_key=settings.GROQ_API_KEY,
                     base_url="https://api.groq.com/openai/v1",
                     temperature=0.2,
+                    max_tokens=4096,
                 )
                 logger.info("LLM: Using Groq LLaMA-3.3-70B (failover).")
                 _cached_llm = llm
@@ -160,6 +162,7 @@ def get_llm() -> ChatOpenAI:
         api_key=settings.GROQ_API_KEY or "no-key",
         base_url="https://api.groq.com/openai/v1",
         temperature=0.2,
+        max_tokens=4096,
     )
     _cached_llm = llm
     _cached_llm_time = current_time
@@ -190,6 +193,284 @@ def fetch_lessons_backstory(agent_name: str) -> str:
     return ""
 
 
+def get_plain_english_schema_description(output_pydantic) -> str:
+    """
+    Returns a simple plain-English description of a Pydantic model's fields
+    to avoid passing raw JSON schemas which confuse smaller models.
+    """
+    schema = output_pydantic.model_json_schema()
+    props = schema.get("properties", {})
+    defs = schema.get("$defs", {})
+
+    description = "You MUST return a JSON object containing the following fields with their actual values (do not copy this list, populate it with data):\n"
+    for name, info in props.items():
+        desc = info.get("description", "")
+        # Get simplified type
+        if "$ref" in info:
+            ref_name = info["$ref"].split("/")[-1]
+            ref_info = defs.get(ref_name, {})
+            ref_props = ref_info.get("properties", {})
+            fields_desc = ", ".join([f"'{k}'" for k in ref_props.keys()])
+            description += (
+                f"- '{name}' (object): {desc}. Contains fields: {fields_desc}\n"
+            )
+        elif info.get("type") == "array" and "items" in info:
+            items_info = info["items"]
+            if "$ref" in items_info:
+                ref_name = items_info["$ref"].split("/")[-1]
+                ref_info = defs.get(ref_name, {})
+                ref_props = ref_info.get("properties", {})
+                fields_desc = ", ".join([f"'{k}'" for k in ref_props.keys()])
+                description += f"- '{name}' (array of objects): {desc}. Each object in the array must contain fields: {fields_desc}\n"
+            else:
+                item_type = items_info.get("type", "string")
+                description += f"- '{name}' (array of {item_type}s): {desc}\n"
+        else:
+            type_str = info.get("type", "string")
+            description += f"- '{name}' ({type_str}): {desc}\n"
+
+    return description
+
+
+def clean_numeric_strings_in_dict(data: Any) -> Any:
+    """
+    Recursively scans a dictionary/list and converts any string matching currency patterns
+    (like '$2,645.50' or '2,645') into a clean float/int.
+    Excludes keys that must remain strings (e.g. current_value, correlation_to_gold).
+    """
+    exclude_keys = {
+        "current_value",
+        "correlation_to_gold",
+        "trend",
+        "timeframe",
+        "direction",
+        "status",
+        "decision",
+        "issue_type",
+        "severity",
+        "category",
+        "proposed_change",
+        "supporting_evidence",
+        "expected_improvement",
+    }
+    if isinstance(data, list):
+        return [clean_numeric_strings_in_dict(item) for item in data]
+    elif isinstance(data, dict):
+        cleaned = {}
+        for k, v in data.items():
+            if k in exclude_keys:
+                if v is None:
+                    cleaned[k] = None
+                elif not isinstance(v, str):
+                    cleaned[k] = str(v)
+                else:
+                    cleaned[k] = v
+            elif isinstance(v, str):
+                v_strip = v.strip()
+                # matches optionally signed numbers with commas, decimals, and optional leading $
+                if re.match(r"^[-+]?\s*\$?\s*[-+]?\d+(?:,\d+)*(?:\.\d+)?$", v_strip):
+                    num_str = v_strip.replace("$", "").replace(",", "").replace(" ", "")
+                    try:
+                        if "." in num_str:
+                            cleaned[k] = float(num_str)
+                        else:
+                            cleaned[k] = int(num_str)
+                    except ValueError:
+                        cleaned[k] = v
+                else:
+                    cleaned[k] = v
+            else:
+                cleaned[k] = clean_numeric_strings_in_dict(v)
+        return cleaned
+    return data
+
+
+def extract_and_parse_json(text: str, pydantic_model):
+    """
+    Extracts a JSON object from text using regex, and validates it against the pydantic model.
+    Handles arrays, nested blocks, and schema parroting.
+    """
+    # Try parsing the text directly first
+    try:
+        parsed = json.loads(text.strip())
+        cleaned = clean_numeric_strings_in_dict(parsed)
+        return pydantic_model.model_validate(cleaned)
+    except Exception:
+        pass
+
+    # Find JSON blocks starting with { and ending with }
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        json_candidate = text[first_brace : last_brace + 1]
+        try:
+            parsed = json.loads(json_candidate.strip())
+            cleaned = clean_numeric_strings_in_dict(parsed)
+            # If it's a list containing a schema and data, try to extract the data dict
+            if isinstance(cleaned, list):
+                for item in cleaned:
+                    if isinstance(item, dict):
+                        model_keys = set(
+                            pydantic_model.model_json_schema()
+                            .get("properties", {})
+                            .keys()
+                        )
+                        if set(item.keys()).intersection(model_keys):
+                            try:
+                                return pydantic_model.model_validate(item)
+                            except Exception:
+                                pass
+            else:
+                return pydantic_model.model_validate(cleaned)
+        except Exception:
+            pass
+
+    # If the LLM returned a list [schema, data], try to extract each dict in the list
+    try:
+        parsed_list = json.loads(text)
+        cleaned_list = clean_numeric_strings_in_dict(parsed_list)
+        if isinstance(cleaned_list, list):
+            for item in cleaned_list:
+                if isinstance(item, dict):
+                    # Check if it has any keys that match the model's properties (to skip the schema itself)
+                    model_keys = set(
+                        pydantic_model.model_json_schema().get("properties", {}).keys()
+                    )
+                    item_keys = set(item.keys())
+                    # If it has at least some overlap, try validation
+                    if item_keys.intersection(model_keys):
+                        try:
+                            return pydantic_model.model_validate(item)
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+
+    # Let's try to extract any JSON blocks in markdown code blocks
+    matches = re.findall(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+    for match in matches:
+        try:
+            parsed = json.loads(match.strip())
+            cleaned = clean_numeric_strings_in_dict(parsed)
+            return pydantic_model.model_validate(cleaned)
+        except Exception:
+            pass
+
+    # Raise original parsing error if nothing worked
+    raise ValueError(
+        f"Failed to extract and validate JSON for {pydantic_model.__name__} from text: {text[:500]}"
+    )
+
+
+def invoke_llm_with_rate_limit_retry(llm_callable, *args, **kwargs):
+    """
+    Invokes an LLM callable with automatic sleep-and-retry on RateLimitError (429/413).
+    Immediately raises daily limit errors to trigger fallback without sleeping.
+    """
+    import random
+
+    max_retries = 6
+    base_sleep = 10
+
+    # Write debug info to file
+    try:
+        import os
+
+        debug_dir = r"C:\Users\Jayan\.gemini\antigravity\brain\d30b9f8e-e2d5-4ae4-a585-112426304c8f\scratch"
+        os.makedirs(debug_dir, exist_ok=True)
+        debug_file = os.path.join(debug_dir, "debug_llm_calls.txt")
+        with open(debug_file, "a", encoding="utf-8") as f:
+            f.write("\n" + "=" * 80 + "\n")
+            f.write(f"TIMESTAMP: {time.time()}\n")
+            f.write(f"CALLABLE: {llm_callable}\n")
+            if args:
+                f.write(f"ARGS: {str(args)[:2000]}\n")
+            if kwargs:
+                f.write(f"KWARGS: {str(kwargs)[:2000]}\n")
+    except Exception as de:
+        logger.error(f"Debug logging failed: {de}")
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            res = llm_callable(*args, **kwargs)
+            try:
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"RESPONSE STATUS: SUCCESS (attempt {attempt})\n")
+                    f.write(
+                        f"RESPONSE CONTENT (length {len(getattr(res, 'content', ''))}):\n"
+                    )
+                    f.write(f"{getattr(res, 'content', '')}\n")
+                    f.write(
+                        f"RESPONSE METADATA: {getattr(res, 'response_metadata', '')}\n"
+                    )
+            except Exception:
+                pass
+            return res
+        except Exception as e:
+            err_str = str(e)
+            try:
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"RESPONSE STATUS: FAILED (attempt {attempt})\n")
+                    f.write(f"ERROR: {err_str}\n")
+            except Exception:
+                pass
+            is_rate_limit = (
+                "rate_limit" in err_str.lower() or "429" in err_str or "413" in err_str
+            )
+            is_daily_limit = (
+                "daily limit" in err_str.lower()
+                or "tokens per day" in err_str.lower()
+                or "tpd" in err_str.lower()
+            )
+            is_tpm_limit = (
+                "tpm" in err_str.lower()
+                or "tokens per minute" in err_str.lower()
+                or "413" in err_str
+            )
+
+            if is_rate_limit and not is_daily_limit and attempt < max_retries:
+                if is_tpm_limit:
+                    sleep_time = 35 + (attempt * 10) + random.uniform(2.0, 8.0)
+                    logger.warning(
+                        f"TPM Rate limit hit during LLM invocation (attempt {attempt}/{max_retries}). "
+                        f"Sleeping for {sleep_time:.1f} seconds to clear rolling window... Error: {err_str}"
+                    )
+                else:
+                    sleep_time = (base_sleep * attempt) + random.uniform(1.0, 5.0)
+                    logger.warning(
+                        f"Rate limit hit during LLM invocation (attempt {attempt}/{max_retries}). "
+                        f"Sleeping for {sleep_time:.1f} seconds... Error: {err_str}"
+                    )
+                time.sleep(sleep_time)
+            else:
+                raise e
+
+
+def get_fallback_llm(current_llm: ChatOpenAI) -> ChatOpenAI:
+    """
+    If the current_llm is rate-limited or fails, switches to the emergency fallback
+    model 'llama-3.1-8b-instant' on Groq.
+    """
+    if "llama-3.1-8b-instant" in getattr(current_llm, "model_name", ""):
+        return current_llm
+
+    logger.warning(
+        f"LLM call failed on {getattr(current_llm, 'model_name', 'unknown')}. Switching to emergency fallback model: llama-3.1-8b-instant"
+    )
+    fallback_llm = ChatOpenAI(
+        model="llama-3.1-8b-instant",
+        api_key=settings.GROQ_API_KEY or "no-key",
+        base_url="https://api.groq.com/openai/v1",
+        temperature=0.2,
+        max_tokens=4096,
+    )
+    global _cached_llm, _cached_llm_time
+    _cached_llm = fallback_llm
+    _cached_llm_time = time.time()
+
+    return fallback_llm
+
+
 # ─────────────────────────────────────────────
 # CORE LANGCHAIN AGENT RUNNER
 # ─────────────────────────────────────────────
@@ -205,78 +486,228 @@ def run_langchain_agent(
     prompt_content: str,
 ) -> Any:
     """
-    Executes a LangChain agent with tools in a ReAct-style loop,
-    then returns a structured Pydantic model output.
+    Executes a LangChain agent.
+    If the model is llama-3.1-8b-instant, we use pre-fetching directly.
+    Otherwise, we try a ReAct-style loop first. If it fails, we fall back
+    to pre-fetching all tool outputs and running without tool binding.
     """
     logger.info(f"Agent [{role}]: Starting execution...")
+    active_llm = llm
     tool_map = {t.name: t for t in tools} if tools else {}
-    llm_with_tools = llm.bind_tools(tools) if tools else llm
 
-    system_prompt = (
-        f"You are the {role}.\n"
-        f"Goal: {goal}\n"
-        f"Backstory: {backstory}\n\n"
-        "You have access to helper tools. Use them to gather real-time market data before analysis.\n"
-        "CRITICAL: When calling a tool, output ONLY the tool call block. No text before or after the tool call.\n"
-        "After gathering all needed data, provide your full analysis."
-    )
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=prompt_content),
-    ]
+    use_prefetch = "llama-3.1-8b-instant" in getattr(active_llm, "model_name", "")
 
-    max_steps = 12
-    for step in range(1, max_steps + 1):
-        logger.info(f"Agent [{role}] Step {step}: Invoking model...")
-        response = llm_with_tools.invoke(messages)
-        tool_calls = getattr(response, "tool_calls", [])
-        if not tool_calls:
-            messages.append(response)
-            break
-        messages.append(response)
-        for tc in tool_calls:
-            name = tc["name"]
-            args = tc["args"]
-            tool_id = tc["id"]
-            logger.info(f"Agent [{role}] Step {step}: Calling tool '{name}'")
-            if name in tool_map:
+    if not use_prefetch and tools:
+        # Try standard ReAct loop
+        try:
+            tool_instr = (
+                "You have access to helper tools. Use them to gather real-time market data before analysis.\n"
+                "CRITICAL: When calling a tool, output ONLY the tool call block. No text before or after the tool call.\n"
+            )
+            system_prompt = (
+                f"You are the {role}.\n"
+                f"Goal: {goal}\n"
+                f"Backstory: {backstory}\n\n"
+                f"{tool_instr}"
+                "After gathering all needed data, provide your full analysis."
+            )
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt_content),
+            ]
+
+            max_steps = 12
+            for step in range(1, max_steps + 1):
+                logger.info(f"Agent [{role}] Step {step}: Invoking model...")
+                llm_with_tools = active_llm.bind_tools(tools)
+                response = invoke_llm_with_rate_limit_retry(
+                    llm_with_tools.invoke, messages
+                )
+
+                tool_calls = getattr(response, "tool_calls", [])
+                if not tool_calls:
+                    messages.append(response)
+                    break
+                messages.append(response)
+                for tc in tool_calls:
+                    name = tc["name"]
+                    args = tc["args"]
+                    tool_id = tc["id"]
+                    logger.info(f"Agent [{role}] Step {step}: Calling tool '{name}'")
+                    if name in tool_map:
+                        try:
+                            result = tool_map[name].invoke(args)
+                        except Exception as e:
+                            result = f"Error executing tool '{name}': {e}"
+                            logger.error(result)
+                    else:
+                        result = f"Error: Tool '{name}' not registered."
+                        logger.error(result)
+                    messages.append(
+                        ToolMessage(content=str(result), tool_call_id=tool_id)
+                    )
+
+            # ReAct loop completed successfully
+        except Exception as e:
+            logger.warning(
+                f"Agent [{role}] ReAct loop failed ({e}). Falling back to pre-fetching tool data..."
+            )
+            # If the current LLM caused the failure and is not the fallback, get fallback
+            if "llama-3.1-8b-instant" not in getattr(active_llm, "model_name", ""):
+                active_llm = get_fallback_llm(active_llm)
+            use_prefetch = True
+
+    if use_prefetch or not tools:
+        # Pre-fetch all tools and run in 1 turn directly to JSON output
+        pre_fetched_context = ""
+        if tools:
+            logger.info(f"Agent [{role}]: Pre-fetching {len(tools)} tools...")
+            tool_results = []
+            max_res_len = (
+                1000
+                if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", "")
+                else 6000
+            )
+            for t in tools:
                 try:
-                    result = tool_map[name].invoke(args)
-                except Exception as e:
-                    result = f"Error executing tool '{name}': {e}"
-                    logger.error(result)
-            else:
-                result = f"Error: Tool '{name}' not registered."
-                logger.error(result)
-            messages.append(ToolMessage(content=str(result), tool_call_id=tool_id))
+                    res = str(t.invoke({}))
+                    if len(res) > max_res_len:
+                        res = res[:max_res_len] + "\n... [TRUNCATED] ..."
+                    tool_results.append(f"### Tool '{t.name}' Output:\n{res}")
+                except Exception as te:
+                    logger.error(
+                        f"Agent [{role}]: Error pre-fetching tool '{t.name}': {te}"
+                    )
+                    tool_results.append(f"### Tool '{t.name}' Output:\nError: {te}")
+            pre_fetched_context = (
+                "\n\n## Pre-fetched Market/News Data:\n" + "\n\n".join(tool_results)
+            )
+
+        schema_desc = get_plain_english_schema_description(output_pydantic)
+
+        system_prompt = (
+            f"You are the {role}.\n"
+            f"Goal: {goal}\n"
+            f"Backstory: {backstory}\n\n"
+            "You are provided with pre-fetched market and news data in the user message. "
+            "Use this data directly to populate the required JSON response structure.\n\n"
+            f"{schema_desc}\n\n"
+            "CRITICAL: Output ONLY the populated JSON object. Do not explain, do not add markdown code blocks. "
+            "Start with '{' and end with '}'. No extra text."
+        )
+        full_prompt = prompt_content
+        if pre_fetched_context:
+            full_prompt += pre_fetched_context
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=full_prompt),
+        ]
+
+        logger.info(f"Agent [{role}]: Invoking LLM for direct JSON output...")
+        try:
+            response = invoke_llm_with_rate_limit_retry(active_llm.invoke, messages)
+            final = extract_and_parse_json(response.content, output_pydantic)
+        except Exception as e:
+            if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", ""):
+                raise e
+            active_llm = get_fallback_llm(active_llm)
+            # Re-generate system prompt with fallback model's constraint
+            system_prompt = (
+                f"You are the {role}.\n"
+                f"Goal: {goal}\n"
+                f"Backstory: {backstory}\n\n"
+                "You are provided with pre-fetched market and news data in the user message. "
+                "Use this data directly to populate the required JSON response structure.\n\n"
+                f"{schema_desc}\n\n"
+                "CRITICAL: Keep all narrative summaries under 25 words and keep the JSON extremely concise. "
+                "Output ONLY the JSON object. Do not explain, do not add markdown code blocks. "
+                "Start with '{' and end with '}'. No extra text."
+            )
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=full_prompt),
+            ]
+            response = invoke_llm_with_rate_limit_retry(active_llm.invoke, messages)
+            final = extract_and_parse_json(response.content, output_pydantic)
+
+        return final
 
     logger.info(f"Agent [{role}]: Generating structured output...")
     try:
-        llm_structured = llm.with_structured_output(output_pydantic)
-        final = llm_structured.invoke(
-            messages
-            + [
-                HumanMessage(
-                    content=f"Based on all research above, provide your final structured output for {output_pydantic.__name__}."
-                )
-            ]
-        )
-    except Exception as e:
-        logger.warning(f"Structured output failed ({e}). Falling back to json_mode...")
-        schema_str = json.dumps(output_pydantic.model_json_schema(), indent=2)
-        llm_structured = llm.with_structured_output(output_pydantic, method="json_mode")
-        final = llm_structured.invoke(
-            messages
-            + [
-                HumanMessage(
-                    content=(
-                        f"Output a valid JSON object matching this schema:\n\n"
-                        f"```json\n{schema_str}\n```\n\n"
-                        "Output ONLY the JSON object starting with '{' and ending with '}'. No extra text."
+        if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", ""):
+            raise ValueError(
+                "Bypassing structured output for fallback LLM to save token rate limits"
+            )
+        try:
+            llm_structured = active_llm.with_structured_output(output_pydantic)
+            final = invoke_llm_with_rate_limit_retry(
+                llm_structured.invoke,
+                messages
+                + [
+                    HumanMessage(
+                        content=f"Based on all research above, provide your final structured output for {output_pydantic.__name__}."
                     )
-                )
-            ]
+                ],
+            )
+        except Exception as e:
+            if "json_schema" in str(e):
+                raise e
+            if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", ""):
+                raise e
+            active_llm = get_fallback_llm(active_llm)
+            llm_structured = active_llm.with_structured_output(output_pydantic)
+            final = invoke_llm_with_rate_limit_retry(
+                llm_structured.invoke,
+                messages
+                + [
+                    HumanMessage(
+                        content=f"Based on all research above, provide your final structured output for {output_pydantic.__name__}."
+                    )
+                ],
+            )
+    except Exception as e:
+        logger.warning(
+            f"Structured output failed ({e}). Falling back to manual JSON extraction..."
         )
+        schema_desc = get_plain_english_schema_description(output_pydantic)
+        try:
+            raw_response = invoke_llm_with_rate_limit_retry(
+                active_llm.invoke,
+                messages
+                + [
+                    HumanMessage(
+                        content=(
+                            f"Based on the research above, generate the final analysis and output it as a valid JSON object.\n\n"
+                            f"{schema_desc}\n\n"
+                            "CRITICAL: Keep all narrative summaries under 25 words and keep the JSON extremely concise. "
+                            "Output ONLY the JSON object. Do not explain, do not add markdown code blocks. "
+                            "Start with '{' and end with '}'. No extra text."
+                        )
+                    )
+                ],
+            )
+            final = extract_and_parse_json(raw_response.content, output_pydantic)
+        except Exception as e2:
+            if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", ""):
+                raise e2
+            active_llm = get_fallback_llm(active_llm)
+            raw_response = invoke_llm_with_rate_limit_retry(
+                active_llm.invoke,
+                messages
+                + [
+                    HumanMessage(
+                        content=(
+                            f"Based on the research above, generate the final analysis and output it as a valid JSON object.\n\n"
+                            f"{schema_desc}\n\n"
+                            "CRITICAL: Keep all narrative summaries under 25 words and keep the JSON extremely concise. "
+                            "Output ONLY the JSON object. Do not explain, do not add markdown code blocks. "
+                            "Start with '{' and end with '}'. No extra text."
+                        )
+                    )
+                ],
+            )
+            final = extract_and_parse_json(raw_response.content, output_pydantic)
     return final
 
 
@@ -333,6 +764,11 @@ def run_fundamental_research(
     db_service.update_agent_status("NewsResearchAgent", "active", tasks_delta=1)
 
     # Step 2: Correlation Agent
+    is_fallback = "llama-3.1-8b-instant" in getattr(llm, "model_name", "")
+    if is_fallback:
+        logger.info("Sleeping for 8s to prevent rate limits before CorrelationAgent...")
+        time.sleep(8.0)
+
     corr_output = run_langchain_agent(
         llm=llm,
         role="CorrelationAgent",
@@ -365,12 +801,22 @@ def run_fundamental_research(
             "3. Fetch commodity prices: Silver, WTI Oil, Brent, Copper.\n"
             "4. Fetch S&P500 and VIX indices.\n"
             "5. Fetch Bitcoin price (risk sentiment indicator).\n"
-            "Analyze correlation scores and calculate net confluence score for gold direction."
+            "Analyze correlation scores and calculate net confluence score for gold direction.\n\n"
+            "CRITICAL CONCISENESS RULE: Keep your JSON response extremely concise. "
+            "Limit the 'correlations' list to only the top 4 most critical instruments (e.g. DXY, US10Y, Silver, VIX). "
+            "For each correlation item, keep the 'analysis' field under 10 words. "
+            "Keep the overall 'summary' field under 25 words. This is necessary to prevent API token truncation."
         ),
     )
     db_service.update_agent_status("CorrelationAgent", "active", tasks_delta=1)
 
     # Step 3: Fundamental Direction Agent (synthesizes News + Correlation)
+    if is_fallback:
+        logger.info(
+            "Sleeping for 8s to prevent rate limits before FundamentalDirectionAgent..."
+        )
+        time.sleep(8.0)
+
     fundamental_output = run_langchain_agent(
         llm=llm,
         role="FundamentalDirectionAgent",
@@ -430,6 +876,7 @@ def run_fundamental_research(
 def run_single_timeframe_analyst(llm: ChatOpenAI, timeframe: str) -> TimeframeAnalysis:
     """Runs a single timeframe analyst for the given timeframe."""
     logger.info(f"Technical Analyst [{timeframe}]: Fetching OHLCV data...")
+    active_llm = llm
     try:
         ohlcv_json = fetch_ohlcv_data.invoke({"timeframe": timeframe, "bars": 50})
         structure_analysis = analyze_price_structure.invoke(
@@ -460,20 +907,63 @@ def run_single_timeframe_analyst(llm: ChatOpenAI, timeframe: str) -> TimeframeAn
             ),
         ]
         try:
-            result = llm.with_structured_output(TimeframeAnalysis).invoke(messages)
+            if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", ""):
+                raise ValueError(
+                    "Bypassing structured output for fallback LLM to save token rate limits"
+                )
+            try:
+                result = invoke_llm_with_rate_limit_retry(
+                    active_llm.with_structured_output(TimeframeAnalysis).invoke,
+                    messages,
+                )
+            except Exception as e:
+                if "json_schema" in str(e):
+                    raise e
+                if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", ""):
+                    raise e
+                active_llm = get_fallback_llm(active_llm)
+                result = invoke_llm_with_rate_limit_retry(
+                    active_llm.with_structured_output(TimeframeAnalysis).invoke,
+                    messages,
+                )
         except Exception as e:
             logger.warning(f"TF [{timeframe}] structured fallback: {e}")
-            schema = json.dumps(TimeframeAnalysis.model_json_schema(), indent=2)
-            result = llm.with_structured_output(
-                TimeframeAnalysis, method="json_mode"
-            ).invoke(
-                messages
-                + [
-                    HumanMessage(
-                        content=f"Output ONLY JSON matching:\n```json\n{schema}\n```"
-                    )
-                ]
-            )
+            schema_desc = get_plain_english_schema_description(TimeframeAnalysis)
+            try:
+                raw_response = invoke_llm_with_rate_limit_retry(
+                    active_llm.invoke,
+                    messages
+                    + [
+                        HumanMessage(
+                            content=(
+                                f"Output a valid JSON object containing the populated analysis data matching this structure:\n\n"
+                                f"{schema_desc}\n\n"
+                                "CRITICAL: Output ONLY the JSON object. Do not explain, do not add markdown code blocks. "
+                                "Start with '{' and end with '}'. No extra text."
+                            )
+                        )
+                    ],
+                )
+                result = extract_and_parse_json(raw_response.content, TimeframeAnalysis)
+            except Exception as e2:
+                if "llama-3.1-8b-instant" in getattr(active_llm, "model_name", ""):
+                    raise e2
+                active_llm = get_fallback_llm(active_llm)
+                raw_response = invoke_llm_with_rate_limit_retry(
+                    active_llm.invoke,
+                    messages
+                    + [
+                        HumanMessage(
+                            content=(
+                                f"Output a valid JSON object containing the populated analysis data matching this structure:\n\n"
+                                f"{schema_desc}\n\n"
+                                "CRITICAL: Output ONLY the JSON object. Do not explain, do not add markdown code blocks. "
+                                "Start with '{' and end with '}'. No extra text."
+                            )
+                        )
+                    ],
+                )
+                result = extract_and_parse_json(raw_response.content, TimeframeAnalysis)
         logger.info(f"Technical Analyst [{timeframe}]: {result.trend}")
         return result
     except Exception as e:
@@ -496,7 +986,14 @@ def run_technical_research(llm: ChatOpenAI, cycle_id: str) -> TechnicalDirection
     logger.info("=== TECHNICAL RESEARCH TRACK STARTED ===")
 
     timeframe_results = []
-    for tf in TIMEFRAMES:
+    for idx, tf in enumerate(TIMEFRAMES):
+        if idx > 0:
+            is_fallback = "llama-3.1-8b-instant" in getattr(llm, "model_name", "")
+            sleep_sec = 6.0 if is_fallback else 1.5
+            logger.info(
+                f"Sleeping for {sleep_sec}s before next timeframe analysis to prevent rate limits..."
+            )
+            time.sleep(sleep_sec)
         result = run_single_timeframe_analyst(llm, tf)
         timeframe_results.append(result)
         db_service.update_agent_status(f"Analyst_{tf}", "active", tasks_delta=1)
@@ -527,7 +1024,7 @@ def run_technical_research(llm: ChatOpenAI, cycle_id: str) -> TechnicalDirection
             "Invalidation = the structural level that breaks the thesis."
             + fetch_lessons_backstory("TechnicalDirectionAgent")
         ),
-        tools=[fetch_gold_price],
+        tools=[],
         output_pydantic=TechnicalDirectionOutput,
         prompt_content=(
             f"Multi-Timeframe Analysis Results:\n\n{timeframe_summaries}\n\n"
@@ -609,7 +1106,7 @@ def run_qa_trade_agent(
             "If both directions NEUTRAL or disagree: REJECTED."
             + fetch_lessons_backstory("QATradeAgent")
         ),
-        tools=[fetch_gold_price],
+        tools=[],
         output_pydantic=QATradeDecision,
         prompt_content=(
             f"Current XAU/USD Price: ${current_price:.2f}\n\n"
@@ -836,43 +1333,87 @@ def process_telegram_approval(signal_id: str, action: str) -> Dict[str, Any]:
 def create_xauusd_pipeline(cycle_id: str) -> Dict[str, Any]:
     """
     Main orchestration pipeline.
-    Runs Fundamental + Technical tracks in PARALLEL, then QA, then Telegram.
+    Runs Fundamental + Technical tracks in PARALLEL for primary LLMs,
+    but runs SEQUENTIALLY with spacing sleeps if fallback llama-3.1-8b-instant is active
+    to prevent exceeding its 6000 TPM rate limit.
     """
     llm = get_llm()
     results = {}
 
-    logger.info(f"Pipeline [{cycle_id[:8]}]: Starting parallel research tracks...")
-    with ThreadPoolExecutor(
-        max_workers=2, thread_name_prefix="xauusd_research"
-    ) as executor:
-        fundamental_future = executor.submit(run_fundamental_research, llm, cycle_id)
-        technical_future = executor.submit(run_technical_research, llm, cycle_id)
+    is_fallback = (
+        "llama-3.1-8b-instant" in getattr(llm, "model_name", "")
+        or "llama-3.3-70b-versatile" in getattr(llm, "model_name", "")
+        or not settings.OPENROUTER_API_KEY
+    )
 
-        for future in as_completed([fundamental_future, technical_future]):
-            try:
-                outcome = future.result()
-                if isinstance(outcome, FundamentalDirectionOutput):
-                    results["fundamental"] = outcome
-                    logger.info(
-                        f"Pipeline: Fundamental track done — {outcome.direction}"
-                    )
-                elif isinstance(outcome, TechnicalDirectionOutput):
-                    results["technical"] = outcome
-                    logger.info(f"Pipeline: Technical track done — {outcome.direction}")
-            except Exception as e:
-                logger.error(f"Pipeline research track failed: {e}")
-                raise
+    if is_fallback:
+        logger.info(
+            f"Pipeline [{cycle_id[:8]}]: Fallback LLM detected. Running research tracks SEQUENTIALLY with spacing..."
+        )
+        try:
+            fundamental_res = run_fundamental_research(llm, cycle_id)
+            results["fundamental"] = fundamental_res
+            logger.info("Pipeline: Fundamental track done.")
+
+            logger.info(
+                "Sleeping for 10s between research tracks to clear TPM window..."
+            )
+            time.sleep(10.0)
+
+            technical_res = run_technical_research(llm, cycle_id)
+            results["technical"] = technical_res
+            logger.info("Pipeline: Technical track done.")
+        except Exception as e:
+            logger.error(f"Pipeline sequential research track failed: {e}")
+            raise
+    else:
+        logger.info(f"Pipeline [{cycle_id[:8]}]: Starting parallel research tracks...")
+        with ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="xauusd_research"
+        ) as executor:
+            fundamental_future = executor.submit(
+                run_fundamental_research, llm, cycle_id
+            )
+            technical_future = executor.submit(run_technical_research, llm, cycle_id)
+
+            for future in as_completed([fundamental_future, technical_future]):
+                try:
+                    outcome = future.result()
+                    if isinstance(outcome, FundamentalDirectionOutput):
+                        results["fundamental"] = outcome
+                        logger.info(
+                            f"Pipeline: Fundamental track done — {outcome.direction}"
+                        )
+                    elif isinstance(outcome, TechnicalDirectionOutput):
+                        results["technical"] = outcome
+                        logger.info(
+                            f"Pipeline: Technical track done — {outcome.direction}"
+                        )
+                except Exception as e:
+                    logger.error(f"Pipeline research track failed: {e}")
+                    raise
 
     if "fundamental" not in results or "technical" not in results:
         raise RuntimeError("Pipeline: One or both research tracks failed.")
 
+    # Spacing sleep before QA Trade Agent if using fallback
+    current_llm = get_llm()
+    if "llama-3.1-8b-instant" in getattr(current_llm, "model_name", ""):
+        logger.info("Sleeping for 8s before QA Trade Agent to clear TPM window...")
+        time.sleep(8.0)
+
     qa_decision = run_qa_trade_agent(
-        llm=llm,
+        llm=current_llm,
         cycle_id=cycle_id,
         fundamental=results["fundamental"],
         technical=results["technical"],
     )
     results["qa"] = qa_decision
+
+    # Spacing sleep before Telegram Report Agent if using fallback
+    if "llama-3.1-8b-instant" in getattr(current_llm, "model_name", ""):
+        logger.info("Sleeping for 5s before Telegram Report Agent...")
+        time.sleep(5.0)
 
     signal_id = run_telegram_report_agent(cycle_id, qa_decision)
     results["signal_id"] = signal_id

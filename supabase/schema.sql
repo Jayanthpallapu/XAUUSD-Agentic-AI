@@ -134,12 +134,135 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Fundamental Reports table
+CREATE TABLE IF NOT EXISTS fundamental_reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cycle_id UUID REFERENCES analysis_cycles(id) ON DELETE CASCADE,
+    news_summary TEXT,
+    news_sentiment_score FLOAT DEFAULT 0.0,
+    is_high_impact_day BOOLEAN DEFAULT FALSE,
+    correlation_confluence_score FLOAT DEFAULT 0.0,
+    direction TEXT,
+    confidence FLOAT,
+    key_drivers JSONB DEFAULT '[]'::jsonb,
+    risk_factors JSONB DEFAULT '[]'::jsonb,
+    summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Technical Reports table
+CREATE TABLE IF NOT EXISTS technical_reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cycle_id UUID REFERENCES analysis_cycles(id) ON DELETE CASCADE,
+    direction TEXT,
+    confidence FLOAT,
+    htf_bias TEXT,
+    ltf_entry_signal TEXT,
+    entry_zone TEXT,
+    invalidation_level FLOAT,
+    timeframe_count INTEGER,
+    summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- QA Decisions table
+CREATE TABLE IF NOT EXISTS qa_decisions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cycle_id UUID REFERENCES analysis_cycles(id) ON DELETE CASCADE,
+    decision TEXT,
+    direction TEXT,
+    entry_price FLOAT,
+    stop_loss FLOAT,
+    take_profit_1 FLOAT,
+    take_profit_2 FLOAT,
+    lot_size FLOAT,
+    risk_reward_ratio FLOAT,
+    combined_confidence FLOAT,
+    rejection_reason TEXT,
+    summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pending Signals table
+CREATE TABLE IF NOT EXISTS pending_signals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    signal_id TEXT,
+    cycle_id UUID REFERENCES analysis_cycles(id) ON DELETE CASCADE,
+    direction TEXT,
+    entry_price FLOAT,
+    stop_loss FLOAT,
+    take_profit_1 FLOAT,
+    take_profit_2 FLOAT,
+    lot_size FLOAT,
+    risk_reward_ratio FLOAT,
+    account_risk_pct FLOAT,
+    fundamental_confidence FLOAT,
+    technical_confidence FLOAT,
+    combined_confidence FLOAT,
+    fundamental_reason TEXT,
+    technical_reason TEXT,
+    status TEXT DEFAULT 'pending_approval',
+    telegram_message_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Trade Journal table
+CREATE TABLE IF NOT EXISTS trade_journal (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    trade_id TEXT,
+    signal_id TEXT,
+    cycle_id TEXT,
+    direction TEXT,
+    entry_price FLOAT,
+    stop_loss FLOAT,
+    take_profit_1 FLOAT,
+    take_profit_2 FLOAT,
+    lot_size FLOAT,
+    risk_reward_ratio FLOAT,
+    account_risk_pct FLOAT,
+    fundamental_reason TEXT,
+    technical_reason TEXT,
+    combined_confidence FLOAT,
+    status TEXT DEFAULT 'active',
+    locked BOOLEAN DEFAULT TRUE,
+    close_price FLOAT,
+    pnl_pips FLOAT DEFAULT 0.0,
+    pnl_usd FLOAT DEFAULT 0.0,
+    opened_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Learning Recommendations table
+CREATE TABLE IF NOT EXISTS learning_recommendations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    recommendation_id TEXT,
+    category TEXT,
+    proposed_change TEXT,
+    supporting_evidence TEXT,
+    expected_improvement TEXT,
+    adopted BOOLEAN DEFAULT FALSE,
+    adopted_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Seed Agent Registry
 INSERT INTO agent_registry (name, role, status) VALUES
-('CorrelationAgent', 'Correlated Pairs & News Analyst', 'active'),
-('NewsAgent', 'XAUUSD News & Impact Analyst', 'active'),
-('TradingAgent', 'Price Reaction Observer & Signal Generator', 'active'),
-('QAAgent', 'Quality Assurance & Improvement Analyst', 'active'),
-('PerformanceAgent', 'Trade Observability & Accuracy Tracker', 'active'),
-('SupervisorAgent', 'Chief AI Officer — System Supervisor', 'active')
+('NewsResearchAgent', 'Fundamental — News & Sentiment Researcher', 'active'),
+('CorrelationAgent', 'Fundamental — Macro Correlation Analyst', 'active'),
+('FundamentalDirectionAgent', 'Fundamental — Direction Synthesizer', 'active'),
+('TechnicalDirectionAgent', 'Technical — Multi-Timeframe Synthesizer', 'active'),
+('Analyst_1W', 'Technical — 1-Week Timeframe Analyst', 'active'),
+('Analyst_1D', 'Technical — 1-Day Timeframe Analyst', 'active'),
+('Analyst_4H', 'Technical — 4-Hour Timeframe Analyst', 'active'),
+('Analyst_1H', 'Technical — 1-Hour Timeframe Analyst', 'active'),
+('Analyst_15M', 'Technical — 15-Minute Timeframe Analyst', 'active'),
+('Analyst_5M', 'Technical — 5-Minute Timeframe Analyst', 'active'),
+('QATradeAgent', 'QA — Risk Manager & Trade Validator', 'active'),
+('TelegramReportAgent', 'QA — Telegram Signal Publisher', 'active'),
+('TradeExecutionAgent', 'Execution — Paper Trade Executor', 'active'),
+('TradeJournalAgent', 'Execution — Immutable Trade Journal', 'active'),
+('PerformanceAgent', 'Performance — Analytics & Attribution', 'active'),
+('LearningAgent', 'Performance — Strategy Recommendations (Read-only)', 'active'),
+('SupervisorAgent', 'Supervisor — System Health & Coordinator', 'active')
 ON CONFLICT (name) DO UPDATE SET status = 'active';
