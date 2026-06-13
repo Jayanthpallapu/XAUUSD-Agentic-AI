@@ -1,5 +1,4 @@
-﻿import logging
-import json
+import logging
 import requests
 from langchain_core.tools import tool
 from config import settings
@@ -8,6 +7,7 @@ logger = logging.getLogger("market_data_tools")
 
 try:
     import yfinance as yf
+
     YFINANCE_AVAILABLE = True
 except ImportError:
     YFINANCE_AVAILABLE = False
@@ -17,7 +17,10 @@ except ImportError:
 @tool
 def fetch_gold_price() -> str:
     """Fetches the current real-time or near-real-time gold price (XAU/USD) in USD."""
-    if settings.TWELVE_DATA_API_KEY and "your_twelve" not in settings.TWELVE_DATA_API_KEY.lower():
+    if (
+        settings.TWELVE_DATA_API_KEY
+        and "your_twelve" not in settings.TWELVE_DATA_API_KEY.lower()
+    ):
         try:
             url = f"https://api.twelvedata.com/price?symbol=XAU/USD&apikey={settings.TWELVE_DATA_API_KEY}"
             res = requests.get(url, timeout=10)
@@ -48,9 +51,14 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
     pair_list = [p.strip().upper() for p in pairs.split(",")]
     results = []
 
-    if settings.TWELVE_DATA_API_KEY and "your_twelve" not in settings.TWELVE_DATA_API_KEY.lower():
+    if (
+        settings.TWELVE_DATA_API_KEY
+        and "your_twelve" not in settings.TWELVE_DATA_API_KEY.lower()
+    ):
         try:
-            formatted_pairs = ",".join([f"{p[:3]}/{p[3:]}" for p in pair_list if len(p) == 6])
+            formatted_pairs = ",".join(
+                [f"{p[:3]}/{p[3:]}" for p in pair_list if len(p) == 6]
+            )
             url = f"https://api.twelvedata.com/price?symbol={formatted_pairs}&apikey={settings.TWELVE_DATA_API_KEY}"
             res = requests.get(url, timeout=10)
             data = res.json()
@@ -59,7 +67,9 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
             elif isinstance(data, dict):
                 for p_key, p_val in data.items():
                     if isinstance(p_val, dict) and "price" in p_val:
-                        results.append(f"{p_key.replace('/', '')}: {float(p_val['price']):.4f}")
+                        results.append(
+                            f"{p_key.replace('/', '')}: {float(p_val['price']):.4f}"
+                        )
             if results:
                 return "Forex Rates: " + ", ".join(results) + " (via Twelve Data)"
         except Exception as e:
@@ -81,11 +91,21 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
                 if base in rates:
                     frankfurter_rates.append(f"{pair}: {1.0 / rates[base]:.4f}")
         if frankfurter_rates:
-            return "Forex Rates (Daily ECB): " + ", ".join(frankfurter_rates) + " (via Frankfurter API)"
+            return (
+                "Forex Rates (Daily ECB): "
+                + ", ".join(frankfurter_rates)
+                + " (via Frankfurter API)"
+            )
     except Exception as e:
         logger.error(f"Frankfurter forex fetch failed: {e}")
 
-    mock_rates = {"EURUSD": "1.0850", "USDJPY": "154.20", "GBPUSD": "1.2680", "USDCHF": "0.8920", "AUDUSD": "0.6640"}
+    mock_rates = {
+        "EURUSD": "1.0850",
+        "USDJPY": "154.20",
+        "GBPUSD": "1.2680",
+        "USDCHF": "0.8920",
+        "AUDUSD": "0.6640",
+    }
     returned_mocks = [f"{p}: {mock_rates.get(p, '1.0000')}" for p in pair_list]
     return "Forex Rates: " + ", ".join(returned_mocks) + " (Mock Rates)"
 
@@ -95,7 +115,12 @@ def fetch_commodities_prices() -> str:
     """Fetches the current prices of correlated commodities: Silver (XAGUSD), WTI Crude Oil, Brent Crude Oil, and Copper."""
     results = []
     if YFINANCE_AVAILABLE:
-        tickers = {"Silver (XAG/USD)": "SI=F", "WTI Crude Oil": "CL=F", "Brent Crude Oil": "BZ=F", "Copper": "HG=F"}
+        tickers = {
+            "Silver (XAG/USD)": "SI=F",
+            "WTI Crude Oil": "CL=F",
+            "Brent Crude Oil": "BZ=F",
+            "Copper": "HG=F",
+        }
         for name, ticker_sym in tickers.items():
             try:
                 ticker = yf.Ticker(ticker_sym)
@@ -145,7 +170,11 @@ def fetch_market_indices() -> str:
     """Fetches the US Dollar Index (DXY), S&P 500, and VIX volatility index."""
     results = []
     if YFINANCE_AVAILABLE:
-        tickers = {"US Dollar Index (DXY)": "DX-Y.NYB", "S&P 500": "^GSPC", "VIX": "^VIX"}
+        tickers = {
+            "US Dollar Index (DXY)": "DX-Y.NYB",
+            "S&P 500": "^GSPC",
+            "VIX": "^VIX",
+        }
         for name, ticker_sym in tickers.items():
             try:
                 ticker = yf.Ticker(ticker_sym)
@@ -170,7 +199,11 @@ def fetch_treasury_yields() -> str:
             r2 = requests.get(url2, timeout=10).json()
             y10 = r10.get("observations", [{}])[0].get("value", "N/A")
             y2 = r2.get("observations", [{}])[0].get("value", "N/A")
-            spread = round(float(y10) - float(y2), 3) if y10 != "N/A" and y2 != "N/A" else "N/A"
+            spread = (
+                round(float(y10) - float(y2), 3)
+                if y10 != "N/A" and y2 != "N/A"
+                else "N/A"
+            )
             return f"US 10Y Yield: {y10}% | US 2Y Yield: {y2}% | Spread: {spread}% (via FRED)"
         except Exception as e:
             logger.error(f"FRED API yields fetch failed: {e}")
@@ -180,7 +213,9 @@ def fetch_treasury_yields() -> str:
             price = ticker.fast_info.last_price
             if price:
                 yield_val = price / 10.0 if price > 15.0 else price
-                return f"US 10-Year Treasury Yield: {yield_val:.3f}% (via yfinance ^TNX)"
+                return (
+                    f"US 10-Year Treasury Yield: {yield_val:.3f}% (via yfinance ^TNX)"
+                )
         except Exception as e:
             logger.error(f"yfinance yield fetch failed: {e}")
     return "US 10-Year Treasury Yield: 4.425% (Mock Yield)"
@@ -196,16 +231,34 @@ def fetch_finnhub_news() -> str:
     if not settings.FINNHUB_API_KEY:
         return "Finnhub API key not configured."
     try:
-        import time
-        to_ts = int(time.time())
-        from_ts = to_ts - 86400  # Last 24 hours
         url = f"https://finnhub.io/api/v1/news?category=forex&token={settings.FINNHUB_API_KEY}"
         res = requests.get(url, timeout=10)
         data = res.json()
         if not isinstance(data, list):
             return f"Finnhub news error: {data}"
-        gold_keywords = ["gold", "xau", "fed", "fomc", "inflation", "cpi", "dollar", "dxy", "yields", "rate", "recession", "geopolit"]
-        filtered = [item for item in data if any(kw in item.get("headline", "").lower() or kw in item.get("summary", "").lower() for kw in gold_keywords)]
+        gold_keywords = [
+            "gold",
+            "xau",
+            "fed",
+            "fomc",
+            "inflation",
+            "cpi",
+            "dollar",
+            "dxy",
+            "yields",
+            "rate",
+            "recession",
+            "geopolit",
+        ]
+        filtered = [
+            item
+            for item in data
+            if any(
+                kw in item.get("headline", "").lower()
+                or kw in item.get("summary", "").lower()
+                for kw in gold_keywords
+            )
+        ]
         items = filtered[:8] if filtered else data[:8]
         if not items:
             return "No recent news from Finnhub for gold/macro keywords."
@@ -213,9 +266,12 @@ def fetch_finnhub_news() -> str:
         for item in items:
             headline = item.get("headline", "")
             source = item.get("source", "Finnhub")
-            related = item.get("related", "")
             lines.append(f"• [{source}] {headline}")
-        return f"📰 Finnhub Market News (Live):\n\n" + "\n".join(lines) + "\n\nSource: finnhub.io"
+        return (
+            "📰 Finnhub Market News (Live):\n\n"
+            + "\n".join(lines)
+            + "\n\nSource: finnhub.io"
+        )
     except Exception as e:
         logger.error(f"Finnhub news fetch failed: {e}")
         return f"Finnhub news fetch error: {str(e)}"
@@ -251,7 +307,13 @@ def fetch_alpha_vantage_sentiment() -> str:
                 bearish_count += 1
             headlines.append(f"- {item.get('title', '')} ({label}, Score: {score:.2f})")
         avg_sentiment = sentiment_sum / max(1, len(feed[:6]))
-        overall = "Bullish" if avg_sentiment > 0.15 else "Bearish" if avg_sentiment < -0.15 else "Neutral"
+        overall = (
+            "Bullish"
+            if avg_sentiment > 0.15
+            else "Bearish"
+            if avg_sentiment < -0.15
+            else "Neutral"
+        )
         return (
             f"Alpha Vantage Market Sentiment: {overall} (Avg: {avg_sentiment:.2f})\n"
             f"Bullish: {bullish_count} | Bearish: {bearish_count}\n"

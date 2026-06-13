@@ -57,42 +57,67 @@ mcp = FastMCP("XAUUSD Agentic Company Toolset")
 # 1. Market Data Tools
 # ─────────────────────────────────────────────
 
-@mcp.tool(name="fetch_gold_price", description="Fetches the current spot price of Gold (XAUUSD) in USD via Twelve Data or yfinance.")
+
+@mcp.tool(
+    name="fetch_gold_price",
+    description="Fetches the current spot price of Gold (XAUUSD) in USD via Twelve Data or yfinance.",
+)
 def mcp_fetch_gold_price() -> str:
     return fetch_gold_price.func()
 
 
-@mcp.tool(name="fetch_forex_prices", description="Fetches exchange rates for currency pairs. Input format: 'EURUSD,USDJPY'.")
+@mcp.tool(
+    name="fetch_forex_prices",
+    description="Fetches exchange rates for currency pairs. Input format: 'EURUSD,USDJPY'.",
+)
 def mcp_fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str:
     return fetch_forex_prices.func(pairs=pairs)
 
 
-@mcp.tool(name="fetch_commodities_prices", description="Fetches prices of Silver, WTI Crude Oil, Brent, and Copper.")
+@mcp.tool(
+    name="fetch_commodities_prices",
+    description="Fetches prices of Silver, WTI Crude Oil, Brent, and Copper.",
+)
 def mcp_fetch_commodities_prices() -> str:
     return fetch_commodities_prices.func()
 
 
-@mcp.tool(name="fetch_crypto_prices", description="Fetches the current spot price of Bitcoin (BTC) in USD.")
+@mcp.tool(
+    name="fetch_crypto_prices",
+    description="Fetches the current spot price of Bitcoin (BTC) in USD.",
+)
 def mcp_fetch_crypto_prices() -> str:
     return fetch_crypto_prices.func()
 
 
-@mcp.tool(name="fetch_market_indices", description="Fetches US Dollar Index (DXY), S&P 500, and VIX values.")
+@mcp.tool(
+    name="fetch_market_indices",
+    description="Fetches US Dollar Index (DXY), S&P 500, and VIX values.",
+)
 def mcp_fetch_market_indices() -> str:
     return fetch_market_indices.func()
 
 
-@mcp.tool(name="fetch_treasury_yields", description="Fetches US 10-Year and 2-Year Treasury Yields via FRED API.")
+@mcp.tool(
+    name="fetch_treasury_yields",
+    description="Fetches US 10-Year and 2-Year Treasury Yields via FRED API.",
+)
 def mcp_fetch_treasury_yields() -> str:
     return fetch_treasury_yields.func()
 
 
-@mcp.tool(name="fetch_finnhub_news", description="Fetches latest gold and forex news headlines from Finnhub professional data feed.")
+@mcp.tool(
+    name="fetch_finnhub_news",
+    description="Fetches latest gold and forex news headlines from Finnhub professional data feed.",
+)
 def mcp_fetch_finnhub_news() -> str:
     return fetch_finnhub_news.func()
 
 
-@mcp.tool(name="fetch_alpha_vantage_sentiment", description="Fetches gold and forex news sentiment scores from Alpha Vantage.")
+@mcp.tool(
+    name="fetch_alpha_vantage_sentiment",
+    description="Fetches gold and forex news sentiment scores from Alpha Vantage.",
+)
 def mcp_fetch_alpha_vantage_sentiment() -> str:
     return fetch_alpha_vantage_sentiment.func()
 
@@ -101,17 +126,27 @@ def mcp_fetch_alpha_vantage_sentiment() -> str:
 # 2. News & Economic Calendar Tools
 # ─────────────────────────────────────────────
 
-@mcp.tool(name="fetch_news_rss", description="Fetches latest financial RSS news. Query can be 'gold FOMC inflation'.")
+
+@mcp.tool(
+    name="fetch_news_rss",
+    description="Fetches latest financial RSS news. Query can be 'gold FOMC inflation'.",
+)
 def mcp_fetch_news_rss(query: str = "gold price XAUUSD forex") -> str:
     return fetch_news_rss.func(query=query)
 
 
-@mcp.tool(name="analyze_news_sentiment", description="Retrieves overall gold news sentiment stats and headlines.")
+@mcp.tool(
+    name="analyze_news_sentiment",
+    description="Retrieves overall gold news sentiment stats and headlines.",
+)
 def mcp_analyze_news_sentiment() -> str:
     return analyze_news_sentiment.func()
 
 
-@mcp.tool(name="fetch_economic_calendar", description="Retrieves economic calendar highlighting NFP, FOMC, CPI events via FMP API.")
+@mcp.tool(
+    name="fetch_economic_calendar",
+    description="Retrieves economic calendar highlighting NFP, FOMC, CPI events via FMP API.",
+)
 def mcp_fetch_economic_calendar() -> str:
     return fetch_economic_calendar.func()
 
@@ -120,12 +155,19 @@ def mcp_fetch_economic_calendar() -> str:
 # 3. Technical Analysis Tools (NEW)
 # ─────────────────────────────────────────────
 
-@mcp.tool(name="fetch_ohlcv_data", description="Fetches OHLCV candlestick data for XAU/USD at a given timeframe (1W, 1D, 4H, 1H, 15M, 5M) via Twelve Data.")
+
+@mcp.tool(
+    name="fetch_ohlcv_data",
+    description="Fetches OHLCV candlestick data for XAU/USD at a given timeframe (1W, 1D, 4H, 1H, 15M, 5M) via Twelve Data.",
+)
 def mcp_fetch_ohlcv_data(timeframe: str = "1H", bars: int = 50) -> str:
     return fetch_ohlcv_data.func(timeframe=timeframe, bars=bars)
 
 
-@mcp.tool(name="analyze_price_structure", description="Analyzes OHLCV data to identify trend, market structure, order blocks, liquidity zones, and candlestick patterns.")
+@mcp.tool(
+    name="analyze_price_structure",
+    description="Analyzes OHLCV data to identify trend, market structure, order blocks, liquidity zones, and candlestick patterns.",
+)
 def mcp_analyze_price_structure(ohlcv_json: str, timeframe: str = "1H") -> str:
     return analyze_price_structure.func(ohlcv_json=ohlcv_json, timeframe=timeframe)
 
@@ -134,12 +176,19 @@ def mcp_analyze_price_structure(ohlcv_json: str, timeframe: str = "1H") -> str:
 # 4. Web Scraper Tools
 # ─────────────────────────────────────────────
 
-@mcp.tool(name="scrape_kitco_news", description="Scrapes the latest gold market news from Kitco News with sentiment labels.")
+
+@mcp.tool(
+    name="scrape_kitco_news",
+    description="Scrapes the latest gold market news from Kitco News with sentiment labels.",
+)
 def mcp_scrape_kitco_news() -> str:
     return scrape_kitco_news.func()
 
 
-@mcp.tool(name="scrape_forex_factory_calendar", description="Scrapes today's Forex Factory economic calendar for high-impact USD events.")
+@mcp.tool(
+    name="scrape_forex_factory_calendar",
+    description="Scrapes today's Forex Factory economic calendar for high-impact USD events.",
+)
 def mcp_scrape_forex_factory_calendar() -> str:
     return scrape_forex_factory_calendar.func()
 
@@ -148,7 +197,11 @@ def mcp_scrape_forex_factory_calendar() -> str:
 # 5. Trading Performance Tools
 # ─────────────────────────────────────────────
 
-@mcp.tool(name="execute_paper_trade", description="Executes a simulated paper trade. Direction must be BUY, SELL, or HOLD.")
+
+@mcp.tool(
+    name="execute_paper_trade",
+    description="Executes a simulated paper trade. Direction must be BUY, SELL, or HOLD.",
+)
 def mcp_execute_paper_trade(
     direction: str,
     entry_price: float,
@@ -169,12 +222,18 @@ def mcp_execute_paper_trade(
     )
 
 
-@mcp.tool(name="fetch_trade_performance", description="Fetches closed paper trade logs and performance analytics.")
+@mcp.tool(
+    name="fetch_trade_performance",
+    description="Fetches closed paper trade logs and performance analytics.",
+)
 def mcp_fetch_trade_performance() -> str:
     return fetch_trade_performance.func()
 
 
-@mcp.tool(name="record_teacher_feedback", description="Records educational feedback or corrective notes on a trade.")
+@mcp.tool(
+    name="record_teacher_feedback",
+    description="Records educational feedback or corrective notes on a trade.",
+)
 def mcp_record_teacher_feedback(trade_id: str, notes: str) -> str:
     return record_teacher_feedback.func(trade_id=trade_id, notes=notes)
 
@@ -183,21 +242,36 @@ def mcp_record_teacher_feedback(trade_id: str, notes: str) -> str:
 # 6. System Administration Tools
 # ─────────────────────────────────────────────
 
-@mcp.tool(name="check_agent_health", description="Checks heartbeats, task counts, and uptime for all 16+ active agents.")
+
+@mcp.tool(
+    name="check_agent_health",
+    description="Checks heartbeats, task counts, and uptime for all 16+ active agents.",
+)
 def mcp_check_agent_health() -> str:
     return check_agent_health.func()
 
 
-@mcp.tool(name="restart_agent_node", description="Restarts a stuck or crashed agent node and resets its error count.")
+@mcp.tool(
+    name="restart_agent_node",
+    description="Restarts a stuck or crashed agent node and resets its error count.",
+)
 def mcp_restart_agent_node(agent_name: str) -> str:
     return restart_agent_node.func(agent_name=agent_name)
 
 
-@mcp.tool(name="send_telegram_notification", description="Transmits warnings, signals, or reports to the Telegram channel.")
-def mcp_send_telegram_notification(title: str, message: str, level: str = "info") -> str:
+@mcp.tool(
+    name="send_telegram_notification",
+    description="Transmits warnings, signals, or reports to the Telegram channel.",
+)
+def mcp_send_telegram_notification(
+    title: str, message: str, level: str = "info"
+) -> str:
     return send_telegram_notification.func(title=title, message=message, level=level)
 
 
-@mcp.tool(name="send_telegram_trade_signal", description="Sends a trade signal to Telegram with Approve/Reject inline keyboard buttons.")
+@mcp.tool(
+    name="send_telegram_trade_signal",
+    description="Sends a trade signal to Telegram with Approve/Reject inline keyboard buttons.",
+)
 def mcp_send_telegram_trade_signal(signal_data: str) -> str:
     return send_telegram_trade_signal.func(signal_data=signal_data)

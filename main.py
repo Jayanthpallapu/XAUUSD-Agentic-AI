@@ -554,25 +554,61 @@ AGENT_STATIC_METADATA = {
         "goal": "Research and analyze all gold-relevant news, economic events, Fed communications, inflation data, and geopolitical factors to determine fundamental gold sentiment.",
         "backstory": "Veteran Financial Journalist and Macro Analyst. Monitors breaking geopolitical events, central bank announcements, CPI/PPI releases, FOMC speeches. Hawkish Fed = bearish gold; dovish Fed = bullish gold.",
         "tools": [
-            {"name": "fetch_gold_price", "description": "Fetches real-time Gold spot price."},
-            {"name": "fetch_news_rss", "description": "Google News RSS for gold/forex queries."},
-            {"name": "analyze_news_sentiment", "description": "Alpha Vantage news sentiment scoring."},
-            {"name": "fetch_economic_calendar", "description": "Daily economic calendar events."},
-            {"name": "scrape_kitco_news", "description": "Live Kitco gold news scraper."},
-            {"name": "scrape_forex_factory_calendar", "description": "Forex Factory high-impact events."},
-            {"name": "fetch_finnhub_news", "description": "Finnhub professional market news."},
-            {"name": "fetch_alpha_vantage_sentiment", "description": "Alpha Vantage XAU/USD sentiment scores."},
+            {
+                "name": "fetch_gold_price",
+                "description": "Fetches real-time Gold spot price.",
+            },
+            {
+                "name": "fetch_news_rss",
+                "description": "Google News RSS for gold/forex queries.",
+            },
+            {
+                "name": "analyze_news_sentiment",
+                "description": "Alpha Vantage news sentiment scoring.",
+            },
+            {
+                "name": "fetch_economic_calendar",
+                "description": "Daily economic calendar events.",
+            },
+            {
+                "name": "scrape_kitco_news",
+                "description": "Live Kitco gold news scraper.",
+            },
+            {
+                "name": "scrape_forex_factory_calendar",
+                "description": "Forex Factory high-impact events.",
+            },
+            {
+                "name": "fetch_finnhub_news",
+                "description": "Finnhub professional market news.",
+            },
+            {
+                "name": "fetch_alpha_vantage_sentiment",
+                "description": "Alpha Vantage XAU/USD sentiment scores.",
+            },
         ],
     },
     "CorrelationAgent": {
         "goal": "Analyze DXY, US10Y yields, commodities, crypto, and equity indices to determine their combined net impact on Gold (XAUUSD).",
         "backstory": "Senior Quantitative Analyst specializing in macro correlations. DXY rising = bearish gold. US10Y yields rising = bearish gold. VIX spiking = bullish gold. FRED API provides official yield data.",
         "tools": [
-            {"name": "fetch_forex_prices", "description": "DXY, EUR/USD, and key forex pairs."},
-            {"name": "fetch_commodities_prices", "description": "Silver, WTI Oil, Brent, Copper."},
-            {"name": "fetch_crypto_prices", "description": "Bitcoin risk sentiment indicator."},
+            {
+                "name": "fetch_forex_prices",
+                "description": "DXY, EUR/USD, and key forex pairs.",
+            },
+            {
+                "name": "fetch_commodities_prices",
+                "description": "Silver, WTI Oil, Brent, Copper.",
+            },
+            {
+                "name": "fetch_crypto_prices",
+                "description": "Bitcoin risk sentiment indicator.",
+            },
             {"name": "fetch_market_indices", "description": "S&P500, VIX, DXY."},
-            {"name": "fetch_treasury_yields", "description": "US 10Y and 2Y Treasury yields via FRED."},
+            {
+                "name": "fetch_treasury_yields",
+                "description": "US 10Y and 2Y Treasury yields via FRED.",
+            },
         ],
     },
     "FundamentalDirectionAgent": {
@@ -583,28 +619,130 @@ AGENT_STATIC_METADATA = {
     "TechnicalDirectionAgent": {
         "goal": "Synthesize all 6 timeframe analyses into final technical directional bias with entry zone and invalidation level.",
         "backstory": "Head Technical Analyst. Higher timeframe trumps lower. 1W/1D = macro. 4H/1H = swing. 15M/5M = entry. Uses ICT concepts: order blocks, FVG, liquidity pools, market structure.",
-        "tools": [{"name": "fetch_gold_price", "description": "Fetches current gold spot price for entry context."}],
+        "tools": [
+            {
+                "name": "fetch_gold_price",
+                "description": "Fetches current gold spot price for entry context.",
+            }
+        ],
     },
-    "Analyst_1W": {"goal": "Analyze XAU/USD 1-Week timeframe technical structure.", "backstory": "1-Week specialist. Identifies macro trend, weekly OBs, and major S/R zones.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 1W OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 1W price structure."}]},
-    "Analyst_1D": {"goal": "Analyze XAU/USD 1-Day timeframe technical structure.", "backstory": "1-Day specialist. Identifies daily trend, daily OBs, and key daily levels.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 1D OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 1D price structure."}]},
-    "Analyst_4H": {"goal": "Analyze XAU/USD 4-Hour timeframe technical structure.", "backstory": "4H specialist. Identifies intermediate swing structure, 4H OBs, BOS/CHoCH signals.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 4H OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 4H price structure."}]},
-    "Analyst_1H": {"goal": "Analyze XAU/USD 1-Hour timeframe technical structure.", "backstory": "1H specialist. Identifies 1H swing structure, liquidity sweeps, and fair value gaps.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 1H OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 1H price structure."}]},
-    "Analyst_15M": {"goal": "Analyze XAU/USD 15-Minute timeframe for entry trigger confirmation.", "backstory": "15M specialist. Identifies precise entry triggers: engulfing candles, pin bars, BOS on LTF.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 15M OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 15M price structure."}]},
-    "Analyst_5M": {"goal": "Analyze XAU/USD 5-Minute timeframe for precision entry timing.", "backstory": "5M specialist. Provides the most granular entry timing confirmation within the LTF structure.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 5M OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 5M price structure."}]},
+    "Analyst_1W": {
+        "goal": "Analyze XAU/USD 1-Week timeframe technical structure.",
+        "backstory": "1-Week specialist. Identifies macro trend, weekly OBs, and major S/R zones.",
+        "tools": [
+            {
+                "name": "fetch_ohlcv_data",
+                "description": "Fetches 1W OHLCV from Twelve Data.",
+            },
+            {
+                "name": "analyze_price_structure",
+                "description": "Analyzes 1W price structure.",
+            },
+        ],
+    },
+    "Analyst_1D": {
+        "goal": "Analyze XAU/USD 1-Day timeframe technical structure.",
+        "backstory": "1-Day specialist. Identifies daily trend, daily OBs, and key daily levels.",
+        "tools": [
+            {
+                "name": "fetch_ohlcv_data",
+                "description": "Fetches 1D OHLCV from Twelve Data.",
+            },
+            {
+                "name": "analyze_price_structure",
+                "description": "Analyzes 1D price structure.",
+            },
+        ],
+    },
+    "Analyst_4H": {
+        "goal": "Analyze XAU/USD 4-Hour timeframe technical structure.",
+        "backstory": "4H specialist. Identifies intermediate swing structure, 4H OBs, BOS/CHoCH signals.",
+        "tools": [
+            {
+                "name": "fetch_ohlcv_data",
+                "description": "Fetches 4H OHLCV from Twelve Data.",
+            },
+            {
+                "name": "analyze_price_structure",
+                "description": "Analyzes 4H price structure.",
+            },
+        ],
+    },
+    "Analyst_1H": {
+        "goal": "Analyze XAU/USD 1-Hour timeframe technical structure.",
+        "backstory": "1H specialist. Identifies 1H swing structure, liquidity sweeps, and fair value gaps.",
+        "tools": [
+            {
+                "name": "fetch_ohlcv_data",
+                "description": "Fetches 1H OHLCV from Twelve Data.",
+            },
+            {
+                "name": "analyze_price_structure",
+                "description": "Analyzes 1H price structure.",
+            },
+        ],
+    },
+    "Analyst_15M": {
+        "goal": "Analyze XAU/USD 15-Minute timeframe for entry trigger confirmation.",
+        "backstory": "15M specialist. Identifies precise entry triggers: engulfing candles, pin bars, BOS on LTF.",
+        "tools": [
+            {
+                "name": "fetch_ohlcv_data",
+                "description": "Fetches 15M OHLCV from Twelve Data.",
+            },
+            {
+                "name": "analyze_price_structure",
+                "description": "Analyzes 15M price structure.",
+            },
+        ],
+    },
+    "Analyst_5M": {
+        "goal": "Analyze XAU/USD 5-Minute timeframe for precision entry timing.",
+        "backstory": "5M specialist. Provides the most granular entry timing confirmation within the LTF structure.",
+        "tools": [
+            {
+                "name": "fetch_ohlcv_data",
+                "description": "Fetches 5M OHLCV from Twelve Data.",
+            },
+            {
+                "name": "analyze_price_structure",
+                "description": "Analyzes 5M price structure.",
+            },
+        ],
+    },
     "QATradeAgent": {
         "goal": "Validate trade confluence, enforce RR >= 1:3, calculate lot size, and produce APPROVED or REJECTED decision.",
         "backstory": "Chief Risk Manager. Capital protection is the top priority. Enforces strict rules: confluence required, RR >= 1:3, max 1% account risk. No exceptions.",
-        "tools": [{"name": "fetch_gold_price", "description": "Current gold price for entry validation."}],
+        "tools": [
+            {
+                "name": "fetch_gold_price",
+                "description": "Current gold price for entry validation.",
+            }
+        ],
     },
     "TelegramReportAgent": {
         "goal": "Send approved trade signals to Telegram with inline Approve/Reject keyboard. Awaits human decision.",
         "backstory": "Human-in-the-loop gatekeeper. Sends rich formatted trade card to Telegram with inline keyboard. Stores signal as pending_approval until user responds.",
-        "tools": [{"name": "send_telegram_trade_signal", "description": "Sends trade signal with inline keyboard to Telegram."}, {"name": "send_telegram_notification", "description": "Sends general notifications to Telegram."}],
+        "tools": [
+            {
+                "name": "send_telegram_trade_signal",
+                "description": "Sends trade signal with inline keyboard to Telegram.",
+            },
+            {
+                "name": "send_telegram_notification",
+                "description": "Sends general notifications to Telegram.",
+            },
+        ],
     },
     "TradeExecutionAgent": {
         "goal": "Execute approved paper trades when user clicks Approve in Telegram. Lock the trade journal entry immediately.",
         "backstory": "Paper Trade Executor. Triggered only by Telegram callback after human approval. Creates an immutable trade journal entry. No agent can modify trades after execution.",
-        "tools": [{"name": "execute_paper_trade", "description": "Executes paper trade to Supabase trade_signals table."}],
+        "tools": [
+            {
+                "name": "execute_paper_trade",
+                "description": "Executes paper trade to Supabase trade_signals table.",
+            }
+        ],
     },
     "TradeJournalAgent": {
         "goal": "Write and maintain the immutable trade journal. Each executed trade is locked with locked=True.",
@@ -614,22 +752,47 @@ AGENT_STATIC_METADATA = {
     "PerformanceAgent": {
         "goal": "Observe closed trade results, calculate win rate, PnL, RR achieved, and run attribution analysis.",
         "backstory": "Trading Desk Performance Controller. Reads closed trade journal entries. Calculates metrics: win rate, drawdown, profit factor, attribution per fundamental vs technical factor. Read-only access to trade journal.",
-        "tools": [{"name": "fetch_trade_performance", "description": "Fetches paper trading stats from trade_signals table."}],
+        "tools": [
+            {
+                "name": "fetch_trade_performance",
+                "description": "Fetches paper trading stats from trade_signals table.",
+            }
+        ],
     },
     "LearningAgent": {
         "goal": "Analyze performance data and propose strategy improvements as recommendations. RECOMMENDATION MODE ONLY — no direct changes.",
         "backstory": "Strategy Improvement Researcher. Analyzes wins vs losses to find patterns. Proposes changes (e.g., 'increase minimum RR to 1:4 for Monday trades'). QATradeAgent must review and approve any recommendation before adoption.",
-        "tools": [{"name": "fetch_trade_performance", "description": "Reads performance data for pattern analysis."}],
+        "tools": [
+            {
+                "name": "fetch_trade_performance",
+                "description": "Reads performance data for pattern analysis.",
+            }
+        ],
     },
     "SupervisorAgent": {
         "goal": "Monitor all 16 agents, diagnose errors, restart failed nodes, and send daily summary to Telegram.",
         "backstory": "Chief AI Supervisor. Monitors heartbeats and error counts of all agents. Restarts stuck nodes. Compiles daily execution report. Publishes notifications to Telegram.",
         "tools": [
-            {"name": "check_agent_health", "description": "Checks heartbeats and error counts of all agents."},
-            {"name": "restart_agent_node", "description": "Restarts a failed agent node."},
-            {"name": "record_teacher_feedback", "description": "Records corrective feedback on trades."},
-            {"name": "fetch_trade_performance", "description": "Fetches paper trading stats."},
-            {"name": "send_telegram_notification", "description": "Sends daily summary to Telegram."},
+            {
+                "name": "check_agent_health",
+                "description": "Checks heartbeats and error counts of all agents.",
+            },
+            {
+                "name": "restart_agent_node",
+                "description": "Restarts a failed agent node.",
+            },
+            {
+                "name": "record_teacher_feedback",
+                "description": "Records corrective feedback on trades.",
+            },
+            {
+                "name": "fetch_trade_performance",
+                "description": "Fetches paper trading stats.",
+            },
+            {
+                "name": "send_telegram_notification",
+                "description": "Sends daily summary to Telegram.",
+            },
         ],
     },
 }
@@ -679,6 +842,7 @@ def get_agent_details(name: str):
 # ─────────────────────────────────────────────
 # New Pipeline API Routes
 # ─────────────────────────────────────────────
+
 
 @app.get("/api/pipeline/signals/pending")
 def get_pending_signals():
@@ -733,6 +897,7 @@ def get_learning_recommendations():
 def adopt_learning_recommendation(rec_id: str):
     """Marks a learning recommendation as adopted by QA. QA decision only — not auto-applied."""
     from datetime import datetime
+
     recommendations = db_service.select("learning_recommendations")
     rec = next((r for r in recommendations if r.get("id") == rec_id), None)
     if not rec:
@@ -743,8 +908,6 @@ def adopt_learning_recommendation(rec_id: str):
         {"adopted": True, "adopted_at": datetime.utcnow().isoformat()},
     )
     return {"status": "adopted", "recommendation_id": rec_id}
-
-
 
 
 @app.websocket("/ws/live")
@@ -798,10 +961,13 @@ async def hermes_telegram_webhook(request: Request):
                 action, signal_id = callback_data.split(":", 1)
                 if action in ["approve", "reject"]:
                     from agents.orchestrator.agent import process_telegram_approval
+
                     result = process_telegram_approval(signal_id, action)
 
                     # Update the Telegram message to remove inline keyboard
-                    action_text = "APPROVED ✅" if action == "approve" else "REJECTED ❌"
+                    action_text = (
+                        "APPROVED ✅" if action == "approve" else "REJECTED ❌"
+                    )
                     try:
                         requests.post(
                             f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageReplyMarkup",

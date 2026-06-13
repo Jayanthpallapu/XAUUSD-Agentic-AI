@@ -1,4 +1,4 @@
-﻿"""
+"""
 Technical Analysis Tool
 ========================
 Fetches multi-timeframe OHLCV data from Twelve Data API and applies
@@ -32,7 +32,10 @@ INTERVAL_MAP = {
 
 def _fetch_ohlcv_twelvedata(symbol: str, interval: str, outputsize: int = 50) -> list:
     """Fetch OHLCV from Twelve Data API."""
-    if not settings.TWELVE_DATA_API_KEY or "your_twelve" in settings.TWELVE_DATA_API_KEY.lower():
+    if (
+        not settings.TWELVE_DATA_API_KEY
+        or "your_twelve" in settings.TWELVE_DATA_API_KEY.lower()
+    ):
         return []
     try:
         url = (
@@ -54,20 +57,23 @@ def _fetch_ohlcv_yfinance(interval: str, period: str) -> list:
     """Fetch OHLCV from yfinance as fallback."""
     try:
         import yfinance as yf
+
         ticker = yf.Ticker("GC=F")
         df = ticker.history(period=period, interval=interval)
         if df.empty:
             return []
         rows = []
         for ts, row in df.iterrows():
-            rows.append({
-                "datetime": str(ts),
-                "open": str(round(float(row["Open"]), 2)),
-                "high": str(round(float(row["High"]), 2)),
-                "low": str(round(float(row["Low"]), 2)),
-                "close": str(round(float(row["Close"]), 2)),
-                "volume": str(int(row["Volume"])),
-            })
+            rows.append(
+                {
+                    "datetime": str(ts),
+                    "open": str(round(float(row["Open"]), 2)),
+                    "high": str(round(float(row["High"]), 2)),
+                    "low": str(round(float(row["Low"]), 2)),
+                    "close": str(round(float(row["Close"]), 2)),
+                    "volume": str(int(row["Volume"])),
+                }
+            )
         return list(reversed(rows))  # Most recent first
     except Exception as e:
         logger.error(f"yfinance OHLCV fallback failed: {e}")
@@ -77,7 +83,7 @@ def _fetch_ohlcv_yfinance(interval: str, period: str) -> list:
 YFINANCE_INTERVAL_MAP = {
     "1week": ("1wk", "2y"),
     "1day": ("1d", "6mo"),
-    "4h": ("1h", "60d"),   # yfinance no 4h; use 1h and we process
+    "4h": ("1h", "60d"),  # yfinance no 4h; use 1h and we process
     "1h": ("1h", "30d"),
     "15min": ("15m", "7d"),
     "5min": ("5m", "5d"),
@@ -107,13 +113,15 @@ def fetch_ohlcv_data(timeframe: str = "1H", bars: int = 50) -> str:
         return f"OHLCV data unavailable for {timeframe}. Using mock: Gold ranging near $2640-2660."
 
     # Return as compact JSON string (agents parse this for analysis)
-    return json.dumps({
-        "symbol": "XAU/USD",
-        "timeframe": timeframe,
-        "interval": interval,
-        "bars": len(candles),
-        "candles": candles[:bars],
-    })
+    return json.dumps(
+        {
+            "symbol": "XAU/USD",
+            "timeframe": timeframe,
+            "interval": interval,
+            "bars": len(candles),
+            "candles": candles[:bars],
+        }
+    )
 
 
 @tool
@@ -154,9 +162,9 @@ def analyze_price_structure(ohlcv_json: str, timeframe: str = "1H") -> str:
         # ── Market structure (HH/HL vs LH/LL)
         swings = []
         for i in range(2, min(15, len(candles) - 2)):
-            if highs[i] > highs[i-1] and highs[i] > highs[i+1]:
+            if highs[i] > highs[i - 1] and highs[i] > highs[i + 1]:
                 swings.append(("H", highs[i]))
-            elif lows[i] < lows[i-1] and lows[i] < lows[i+1]:
+            elif lows[i] < lows[i - 1] and lows[i] < lows[i + 1]:
                 swings.append(("L", lows[i]))
 
         prev_highs = [v for t, v in swings if t == "H"][:3]
@@ -179,29 +187,39 @@ def analyze_price_structure(ohlcv_json: str, timeframe: str = "1H") -> str:
         order_block = "None detected"
         for i in range(1, min(10, len(candles) - 1)):
             body_curr = closes[i] - opens[i]
-            body_prev = closes[i+1] - opens[i+1]
+            body_prev = closes[i + 1] - opens[i + 1]
             # Bullish OB: bearish candle followed by strong bullish move
             if body_prev < 0 and body_curr > abs(body_prev) * 1.5:
-                ob_low = min(opens[i+1], closes[i+1])
-                ob_high = max(opens[i+1], closes[i+1])
+                ob_low = min(opens[i + 1], closes[i + 1])
+                ob_high = max(opens[i + 1], closes[i + 1])
                 order_block = f"Bullish OB at ${ob_low:.2f}-${ob_high:.2f} (unmitigated demand zone)"
                 break
             # Bearish OB: bullish candle followed by strong bearish move
             if body_prev > 0 and body_curr < -abs(body_prev) * 1.5:
-                ob_low = min(opens[i+1], closes[i+1])
-                ob_high = max(opens[i+1], closes[i+1])
+                ob_low = min(opens[i + 1], closes[i + 1])
+                ob_high = max(opens[i + 1], closes[i + 1])
                 order_block = f"Bearish OB at ${ob_low:.2f}-${ob_high:.2f} (unmitigated supply zone)"
                 break
 
         # ── Liquidity Zones (equal highs/lows within 0.1%)
         tol = 0.001
-        liq_highs = [h for h in recent_highs if abs(h - max(recent_highs)) / max(recent_highs) < tol]
-        liq_lows = [l for l in recent_lows if abs(l - min(recent_lows)) / min(recent_lows) < tol]
+        liq_highs = [
+            h
+            for h in recent_highs
+            if abs(h - max(recent_highs)) / max(recent_highs) < tol
+        ]
+        liq_lows = [
+            lval for lval in recent_lows if abs(lval - min(recent_lows)) / min(recent_lows) < tol
+        ]
         liquidity_zone = "None"
         if len(liq_highs) >= 2:
-            liquidity_zone = f"Buy-side liquidity above ${max(liq_highs):.2f} (equal highs)"
+            liquidity_zone = (
+                f"Buy-side liquidity above ${max(liq_highs):.2f} (equal highs)"
+            )
         elif len(liq_lows) >= 2:
-            liquidity_zone = f"Sell-side liquidity below ${min(liq_lows):.2f} (equal lows)"
+            liquidity_zone = (
+                f"Sell-side liquidity below ${min(liq_lows):.2f} (equal lows)"
+            )
 
         # ── Candlestick Pattern (last 2 candles)
         c0_body = closes[0] - opens[0]

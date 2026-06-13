@@ -49,28 +49,30 @@ from tools.definitions.news_calendar import (
     analyze_news_sentiment,
     fetch_economic_calendar,
 )
-from tools.definitions.technical_analysis import fetch_ohlcv_data, analyze_price_structure
+from tools.definitions.technical_analysis import (
+    fetch_ohlcv_data,
+    analyze_price_structure,
+)
 from tools.definitions.trading_performance import (
     execute_paper_trade,
-    fetch_trade_performance,
-    record_teacher_feedback,
 )
 from tools.definitions.system import (
-    check_agent_health,
-    restart_agent_node,
     send_telegram_notification,
     send_telegram_trade_signal,
 )
-from tools.definitions.web_scraper import scrape_kitco_news, scrape_forex_factory_calendar
+from tools.definitions.web_scraper import (
+    scrape_kitco_news,
+    scrape_forex_factory_calendar,
+)
 
 logger = logging.getLogger("xauusd_pipeline")
 
 _cached_llm = None
 _cached_llm_time = 0
 
-ACCOUNT_BALANCE = 10000.0   # Paper trading account balance in USD
-MIN_RR_RATIO = 3.0           # Minimum 1:3 risk/reward required
-MAX_RISK_PCT = 1.0            # Maximum 1% account risk per trade
+ACCOUNT_BALANCE = 10000.0  # Paper trading account balance in USD
+MIN_RR_RATIO = 3.0  # Minimum 1:3 risk/reward required
+MAX_RISK_PCT = 1.0  # Maximum 1% account risk per trade
 TIMEFRAMES = ["1W", "1D", "4H", "1H", "15M", "5M"]
 
 
@@ -78,17 +80,23 @@ TIMEFRAMES = ["1W", "1D", "4H", "1H", "15M", "5M"]
 # LLM PROVIDER
 # ─────────────────────────────────────────────
 
+
 def verify_llm_tool_support(api_key: str, model: str, base_url: str) -> bool:
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     data = {
         "model": model,
         "messages": [{"role": "user", "content": "ping"}],
-        "tools": [{"type": "function", "function": {
-            "name": "ping_tool",
-            "description": "ping tool",
-            "parameters": {"type": "object", "properties": {}},
-        }}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "ping_tool",
+                    "description": "ping tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
         "max_tokens": 5,
     }
     try:
@@ -110,7 +118,9 @@ def get_llm() -> ChatOpenAI:
 
     if settings.OPENROUTER_API_KEY:
         hermes_model = "nousresearch/hermes-3-llama-3.1-405b"
-        if verify_llm_tool_support(settings.OPENROUTER_API_KEY, hermes_model, "https://openrouter.ai/api/v1"):
+        if verify_llm_tool_support(
+            settings.OPENROUTER_API_KEY, hermes_model, "https://openrouter.ai/api/v1"
+        ):
             try:
                 llm = ChatOpenAI(
                     model=hermes_model,
@@ -127,7 +137,9 @@ def get_llm() -> ChatOpenAI:
 
     if settings.GROQ_API_KEY:
         groq_model = "llama-3.3-70b-versatile"
-        if verify_llm_tool_support(settings.GROQ_API_KEY, groq_model, "https://api.groq.com/openai/v1"):
+        if verify_llm_tool_support(
+            settings.GROQ_API_KEY, groq_model, "https://api.groq.com/openai/v1"
+        ):
             try:
                 llm = ChatOpenAI(
                     model=groq_model,
@@ -182,6 +194,7 @@ def fetch_lessons_backstory(agent_name: str) -> str:
 # CORE LANGCHAIN AGENT RUNNER
 # ─────────────────────────────────────────────
 
+
 def run_langchain_agent(
     llm: ChatOpenAI,
     role: str,
@@ -207,7 +220,10 @@ def run_langchain_agent(
         "CRITICAL: When calling a tool, output ONLY the tool call block. No text before or after the tool call.\n"
         "After gathering all needed data, provide your full analysis."
     )
-    messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt_content)]
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=prompt_content),
+    ]
 
     max_steps = 12
     for step in range(1, max_steps + 1):
@@ -237,20 +253,30 @@ def run_langchain_agent(
     logger.info(f"Agent [{role}]: Generating structured output...")
     try:
         llm_structured = llm.with_structured_output(output_pydantic)
-        final = llm_structured.invoke(messages + [HumanMessage(
-            content=f"Based on all research above, provide your final structured output for {output_pydantic.__name__}."
-        )])
+        final = llm_structured.invoke(
+            messages
+            + [
+                HumanMessage(
+                    content=f"Based on all research above, provide your final structured output for {output_pydantic.__name__}."
+                )
+            ]
+        )
     except Exception as e:
         logger.warning(f"Structured output failed ({e}). Falling back to json_mode...")
         schema_str = json.dumps(output_pydantic.model_json_schema(), indent=2)
         llm_structured = llm.with_structured_output(output_pydantic, method="json_mode")
-        final = llm_structured.invoke(messages + [HumanMessage(
-            content=(
-                f"Output a valid JSON object matching this schema:\n\n"
-                f"```json\n{schema_str}\n```\n\n"
-                "Output ONLY the JSON object starting with '{' and ending with '}'. No extra text."
-            )
-        )])
+        final = llm_structured.invoke(
+            messages
+            + [
+                HumanMessage(
+                    content=(
+                        f"Output a valid JSON object matching this schema:\n\n"
+                        f"```json\n{schema_str}\n```\n\n"
+                        "Output ONLY the JSON object starting with '{' and ending with '}'. No extra text."
+                    )
+                )
+            ]
+        )
     return final
 
 
@@ -258,7 +284,10 @@ def run_langchain_agent(
 # FUNDAMENTAL RESEARCH TRACK
 # ─────────────────────────────────────────────
 
-def run_fundamental_research(llm: ChatOpenAI, cycle_id: str) -> FundamentalDirectionOutput:
+
+def run_fundamental_research(
+    llm: ChatOpenAI, cycle_id: str
+) -> FundamentalDirectionOutput:
     """Runs NewsResearchAgent + CorrelationAgent then synthesizes FundamentalDirectionOutput."""
     logger.info("=== FUNDAMENTAL RESEARCH TRACK STARTED ===")
 
@@ -370,18 +399,21 @@ def run_fundamental_research(llm: ChatOpenAI, cycle_id: str) -> FundamentalDirec
     )
     db_service.update_agent_status("FundamentalDirectionAgent", "active", tasks_delta=1)
 
-    db_service.insert("fundamental_reports", {
-        "cycle_id": cycle_id,
-        "news_summary": news_output.summary,
-        "news_sentiment_score": news_output.sentiment_score,
-        "is_high_impact_day": news_output.is_high_impact_day,
-        "correlation_confluence_score": corr_output.confluence_score,
-        "direction": fundamental_output.direction,
-        "confidence": fundamental_output.confidence,
-        "key_drivers": fundamental_output.key_drivers,
-        "risk_factors": fundamental_output.risk_factors,
-        "summary": fundamental_output.summary,
-    })
+    db_service.insert(
+        "fundamental_reports",
+        {
+            "cycle_id": cycle_id,
+            "news_summary": news_output.summary,
+            "news_sentiment_score": news_output.sentiment_score,
+            "is_high_impact_day": news_output.is_high_impact_day,
+            "correlation_confluence_score": corr_output.confluence_score,
+            "direction": fundamental_output.direction,
+            "confidence": fundamental_output.confidence,
+            "key_drivers": fundamental_output.key_drivers,
+            "risk_factors": fundamental_output.risk_factors,
+            "summary": fundamental_output.summary,
+        },
+    )
 
     logger.info(
         f"=== FUNDAMENTAL RESEARCH COMPLETE: {fundamental_output.direction} "
@@ -394,39 +426,53 @@ def run_fundamental_research(llm: ChatOpenAI, cycle_id: str) -> FundamentalDirec
 # TECHNICAL RESEARCH TRACK
 # ─────────────────────────────────────────────
 
+
 def run_single_timeframe_analyst(llm: ChatOpenAI, timeframe: str) -> TimeframeAnalysis:
     """Runs a single timeframe analyst for the given timeframe."""
     logger.info(f"Technical Analyst [{timeframe}]: Fetching OHLCV data...")
     try:
         ohlcv_json = fetch_ohlcv_data.invoke({"timeframe": timeframe, "bars": 50})
-        structure_analysis = analyze_price_structure.invoke({
-            "ohlcv_json": ohlcv_json,
-            "timeframe": timeframe,
-        })
+        structure_analysis = analyze_price_structure.invoke(
+            {
+                "ohlcv_json": ohlcv_json,
+                "timeframe": timeframe,
+            }
+        )
 
         messages = [
-            SystemMessage(content=(
-                f"You are a professional Technical Analyst for XAU/USD on the {timeframe} timeframe. "
-                "Analyze the provided technical structure and OHLCV data. "
-                "CRITICAL: Output ONLY valid JSON — no extra text, no markdown."
-            )),
-            HumanMessage(content=(
-                f"Technical Structure Analysis:\n\n{structure_analysis}\n\n"
-                f"OHLCV Data (first 200 chars):\n{ohlcv_json[:200]}...\n\n"
-                f"Provide a TimeframeAnalysis with: "
-                f"timeframe='{timeframe}', trend (BULLISH/BEARISH/RANGING), "
-                "structure, key_support (float), key_resistance (float), "
-                "order_block (string or null), liquidity_zone (string or null), "
-                "candle_pattern (string or null), analysis (2-3 sentence narrative)."
-            )),
+            SystemMessage(
+                content=(
+                    f"You are a professional Technical Analyst for XAU/USD on the {timeframe} timeframe. "
+                    "Analyze the provided technical structure and OHLCV data. "
+                    "CRITICAL: Output ONLY valid JSON — no extra text, no markdown."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Technical Structure Analysis:\n\n{structure_analysis}\n\n"
+                    f"OHLCV Data (first 200 chars):\n{ohlcv_json[:200]}...\n\n"
+                    f"Provide a TimeframeAnalysis with: "
+                    f"timeframe='{timeframe}', trend (BULLISH/BEARISH/RANGING), "
+                    "structure, key_support (float), key_resistance (float), "
+                    "order_block (string or null), liquidity_zone (string or null), "
+                    "candle_pattern (string or null), analysis (2-3 sentence narrative)."
+                )
+            ),
         ]
         try:
             result = llm.with_structured_output(TimeframeAnalysis).invoke(messages)
         except Exception as e:
             logger.warning(f"TF [{timeframe}] structured fallback: {e}")
             schema = json.dumps(TimeframeAnalysis.model_json_schema(), indent=2)
-            result = llm.with_structured_output(TimeframeAnalysis, method="json_mode").invoke(
-                messages + [HumanMessage(content=f"Output ONLY JSON matching:\n```json\n{schema}\n```")]
+            result = llm.with_structured_output(
+                TimeframeAnalysis, method="json_mode"
+            ).invoke(
+                messages
+                + [
+                    HumanMessage(
+                        content=f"Output ONLY JSON matching:\n```json\n{schema}\n```"
+                    )
+                ]
             )
         logger.info(f"Technical Analyst [{timeframe}]: {result.trend}")
         return result
@@ -455,12 +501,14 @@ def run_technical_research(llm: ChatOpenAI, cycle_id: str) -> TechnicalDirection
         timeframe_results.append(result)
         db_service.update_agent_status(f"Analyst_{tf}", "active", tasks_delta=1)
 
-    timeframe_summaries = "\n\n".join([
-        f"{r.timeframe}: {r.trend} | Structure: {r.structure} | "
-        f"S: ${r.key_support:.2f} / R: ${r.key_resistance:.2f} | "
-        f"OB: {r.order_block or 'None'} | Pattern: {r.candle_pattern or 'None'}"
-        for r in timeframe_results
-    ])
+    timeframe_summaries = "\n\n".join(
+        [
+            f"{r.timeframe}: {r.trend} | Structure: {r.structure} | "
+            f"S: ${r.key_support:.2f} / R: ${r.key_resistance:.2f} | "
+            f"OB: {r.order_block or 'None'} | Pattern: {r.candle_pattern or 'None'}"
+            for r in timeframe_results
+        ]
+    )
 
     tech_output = run_langchain_agent(
         llm=llm,
@@ -496,17 +544,20 @@ def run_technical_research(llm: ChatOpenAI, cycle_id: str) -> TechnicalDirection
     tech_output.timeframe_analyses = timeframe_results
     db_service.update_agent_status("TechnicalDirectionAgent", "active", tasks_delta=1)
 
-    db_service.insert("technical_reports", {
-        "cycle_id": cycle_id,
-        "direction": tech_output.direction,
-        "confidence": tech_output.confidence,
-        "htf_bias": tech_output.htf_bias,
-        "ltf_entry_signal": tech_output.ltf_entry_signal,
-        "entry_zone": tech_output.entry_zone,
-        "invalidation_level": tech_output.invalidation_level,
-        "timeframe_count": len(timeframe_results),
-        "summary": tech_output.summary,
-    })
+    db_service.insert(
+        "technical_reports",
+        {
+            "cycle_id": cycle_id,
+            "direction": tech_output.direction,
+            "confidence": tech_output.confidence,
+            "htf_bias": tech_output.htf_bias,
+            "ltf_entry_signal": tech_output.ltf_entry_signal,
+            "entry_zone": tech_output.entry_zone,
+            "invalidation_level": tech_output.invalidation_level,
+            "timeframe_count": len(timeframe_results),
+            "summary": tech_output.summary,
+        },
+    )
 
     logger.info(
         f"=== TECHNICAL RESEARCH COMPLETE: {tech_output.direction} "
@@ -518,6 +569,7 @@ def run_technical_research(llm: ChatOpenAI, cycle_id: str) -> TechnicalDirection
 # ─────────────────────────────────────────────
 # QA TRADE AGENT
 # ─────────────────────────────────────────────
+
 
 def run_qa_trade_agent(
     llm: ChatOpenAI,
@@ -583,20 +635,23 @@ def run_qa_trade_agent(
     )
 
     db_service.update_agent_status("QATradeAgent", "active", tasks_delta=1)
-    db_service.insert("qa_decisions", {
-        "cycle_id": cycle_id,
-        "decision": qa_output.decision,
-        "direction": qa_output.direction,
-        "entry_price": qa_output.entry_price,
-        "stop_loss": qa_output.stop_loss,
-        "take_profit_1": qa_output.take_profit_1,
-        "take_profit_2": qa_output.take_profit_2,
-        "lot_size": qa_output.lot_size,
-        "risk_reward_ratio": qa_output.risk_reward_ratio,
-        "combined_confidence": qa_output.combined_confidence,
-        "rejection_reason": qa_output.rejection_reason,
-        "summary": qa_output.summary,
-    })
+    db_service.insert(
+        "qa_decisions",
+        {
+            "cycle_id": cycle_id,
+            "decision": qa_output.decision,
+            "direction": qa_output.direction,
+            "entry_price": qa_output.entry_price,
+            "stop_loss": qa_output.stop_loss,
+            "take_profit_1": qa_output.take_profit_1,
+            "take_profit_2": qa_output.take_profit_2,
+            "lot_size": qa_output.lot_size,
+            "risk_reward_ratio": qa_output.risk_reward_ratio,
+            "combined_confidence": qa_output.combined_confidence,
+            "rejection_reason": qa_output.rejection_reason,
+            "summary": qa_output.summary,
+        },
+    )
 
     logger.info(f"=== QA TRADE AGENT COMPLETE: {qa_output.decision} ===")
     return qa_output
@@ -606,7 +661,10 @@ def run_qa_trade_agent(
 # TELEGRAM REPORT AGENT
 # ─────────────────────────────────────────────
 
-def run_telegram_report_agent(cycle_id: str, qa_decision: QATradeDecision) -> Optional[str]:
+
+def run_telegram_report_agent(
+    cycle_id: str, qa_decision: QATradeDecision
+) -> Optional[str]:
     """
     If QA approved: sends Telegram trade signal with inline keyboard.
     Stores pending signal awaiting human approval.
@@ -653,15 +711,20 @@ def run_telegram_report_agent(cycle_id: str, qa_decision: QATradeDecision) -> Op
     msg_id_match = re.search(r"message_id=(\d+)", result)
     if msg_id_match:
         msg_id = int(msg_id_match.group(1))
-        db_service.update("pending_signals", {"signal_id": signal_id}, {"telegram_message_id": msg_id})
+        db_service.update(
+            "pending_signals", {"signal_id": signal_id}, {"telegram_message_id": msg_id}
+        )
 
-    logger.info(f"TelegramReportAgent: Signal {signal_id[:8]} sent. Awaiting human approval.")
+    logger.info(
+        f"TelegramReportAgent: Signal {signal_id[:8]} sent. Awaiting human approval."
+    )
     return signal_id
 
 
 # ─────────────────────────────────────────────
 # TELEGRAM APPROVAL CALLBACK (called from webhook)
 # ─────────────────────────────────────────────
+
 
 def process_telegram_approval(signal_id: str, action: str) -> Dict[str, Any]:
     """
@@ -675,7 +738,10 @@ def process_telegram_approval(signal_id: str, action: str) -> Dict[str, Any]:
 
     signal = signals[0]
     if signal.get("status") != "pending_approval":
-        return {"status": "error", "message": f"Signal already processed: {signal.get('status')}"}
+        return {
+            "status": "error",
+            "message": f"Signal already processed: {signal.get('status')}",
+        }
 
     if action == "approve":
         # Execute paper trade (immutable after this)
@@ -693,24 +759,27 @@ def process_telegram_approval(signal_id: str, action: str) -> Dict[str, Any]:
         )
 
         # Lock the trade journal entry
-        db_service.insert("trade_journal", {
-            "trade_id": trade_id,
-            "signal_id": signal_id,
-            "cycle_id": signal.get("cycle_id", ""),
-            "direction": direction,
-            "entry_price": entry,
-            "stop_loss": sl,
-            "take_profit_1": tp1,
-            "take_profit_2": signal.get("take_profit_2"),
-            "lot_size": lot,
-            "risk_reward_ratio": rr,
-            "account_risk_pct": signal.get("account_risk_pct", 1.0),
-            "fundamental_reason": signal.get("fundamental_reason", ""),
-            "technical_reason": signal.get("technical_reason", ""),
-            "combined_confidence": confidence,
-            "status": "active",
-            "locked": True,
-        })
+        db_service.insert(
+            "trade_journal",
+            {
+                "trade_id": trade_id,
+                "signal_id": signal_id,
+                "cycle_id": signal.get("cycle_id", ""),
+                "direction": direction,
+                "entry_price": entry,
+                "stop_loss": sl,
+                "take_profit_1": tp1,
+                "take_profit_2": signal.get("take_profit_2"),
+                "lot_size": lot,
+                "risk_reward_ratio": rr,
+                "account_risk_pct": signal.get("account_risk_pct", 1.0),
+                "fundamental_reason": signal.get("fundamental_reason", ""),
+                "technical_reason": signal.get("technical_reason", ""),
+                "combined_confidence": confidence,
+                "status": "active",
+                "locked": True,
+            },
+        )
 
         # Also execute paper trade for performance tracking
         execute_paper_trade.func(
@@ -723,7 +792,9 @@ def process_telegram_approval(signal_id: str, action: str) -> Dict[str, Any]:
             cycle_id=signal.get("cycle_id", ""),
         )
 
-        db_service.update("pending_signals", {"signal_id": signal_id}, {"status": "executed"})
+        db_service.update(
+            "pending_signals", {"signal_id": signal_id}, {"status": "executed"}
+        )
         db_service.update_agent_status("TradeExecutionAgent", "active", tasks_delta=1)
         db_service.update_agent_status("TradeJournalAgent", "active", tasks_delta=1)
 
@@ -739,11 +810,15 @@ def process_telegram_approval(signal_id: str, action: str) -> Dict[str, Any]:
             ),
             level="info",
         )
-        logger.info(f"TradeExecutionAgent: Trade {trade_id[:8]} executed and journal locked.")
+        logger.info(
+            f"TradeExecutionAgent: Trade {trade_id[:8]} executed and journal locked."
+        )
         return {"status": "executed", "trade_id": trade_id}
 
     else:  # reject
-        db_service.update("pending_signals", {"signal_id": signal_id}, {"status": "rejected"})
+        db_service.update(
+            "pending_signals", {"signal_id": signal_id}, {"status": "rejected"}
+        )
         send_telegram_notification.func(
             title="Trade REJECTED by User",
             message=f"Signal {signal_id[:8]} rejected manually via Telegram. No trade executed.",
@@ -757,6 +832,7 @@ def process_telegram_approval(signal_id: str, action: str) -> Dict[str, Any]:
 # MAIN PIPELINE
 # ─────────────────────────────────────────────
 
+
 def create_xauusd_pipeline(cycle_id: str) -> Dict[str, Any]:
     """
     Main orchestration pipeline.
@@ -766,7 +842,9 @@ def create_xauusd_pipeline(cycle_id: str) -> Dict[str, Any]:
     results = {}
 
     logger.info(f"Pipeline [{cycle_id[:8]}]: Starting parallel research tracks...")
-    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="xauusd_research") as executor:
+    with ThreadPoolExecutor(
+        max_workers=2, thread_name_prefix="xauusd_research"
+    ) as executor:
         fundamental_future = executor.submit(run_fundamental_research, llm, cycle_id)
         technical_future = executor.submit(run_technical_research, llm, cycle_id)
 
@@ -775,7 +853,9 @@ def create_xauusd_pipeline(cycle_id: str) -> Dict[str, Any]:
                 outcome = future.result()
                 if isinstance(outcome, FundamentalDirectionOutput):
                     results["fundamental"] = outcome
-                    logger.info(f"Pipeline: Fundamental track done — {outcome.direction}")
+                    logger.info(
+                        f"Pipeline: Fundamental track done — {outcome.direction}"
+                    )
                 elif isinstance(outcome, TechnicalDirectionOutput):
                     results["technical"] = outcome
                     logger.info(f"Pipeline: Technical track done — {outcome.direction}")

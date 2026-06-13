@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import json
 import requests
 from datetime import datetime
@@ -27,7 +27,9 @@ def check_agent_health() -> str:
             tasks = ag.get("total_tasks_completed", 0)
             accuracy = ag.get("accuracy_score", 1.0)
             hb = ag.get("last_heartbeat", "never")
-            status_symbol = "🟢" if status == "active" else "🔴" if status == "error" else "🟡"
+            status_symbol = (
+                "🟢" if status == "active" else "🔴" if status == "error" else "🟡"
+            )
             reports.append(
                 f"{status_symbol} Agent: {name}\n"
                 f"   Status: {status.upper()}\n"
@@ -55,7 +57,11 @@ def restart_agent_node(agent_name: str) -> str:
         db_service.update(
             "agent_registry",
             filters,
-            {"status": "active", "total_errors": 0, "last_heartbeat": datetime.utcnow().isoformat()},
+            {
+                "status": "active",
+                "total_errors": 0,
+                "last_heartbeat": datetime.utcnow().isoformat(),
+            },
         )
         db_service.insert(
             "audit_log",
@@ -81,7 +87,13 @@ def send_telegram_notification(title: str, message: str, level: str = "info") ->
     Levels can be: 'info', 'warning', or 'critical'.
     """
     level = level.lower().strip()
-    emoji = "🟢 INFO:" if level == "info" else "🟡 WARNING:" if level == "warning" else "🚨 CRITICAL ALERT:"
+    emoji = (
+        "🟢 INFO:"
+        if level == "info"
+        else "🟡 WARNING:"
+        if level == "warning"
+        else "🚨 CRITICAL ALERT:"
+    )
     formatted_msg = (
         f"{emoji} {title}\n"
         f"Timestamp: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n"
@@ -90,15 +102,27 @@ def send_telegram_notification(title: str, message: str, level: str = "info") ->
     try:
         db_service.insert(
             "notifications",
-            {"level": level, "title": title, "message": message, "read": False, "telegram_sent": False},
+            {
+                "level": level,
+                "title": title,
+                "message": message,
+                "read": False,
+                "telegram_sent": False,
+            },
         )
     except Exception as e:
         logger.error(f"Error saving notification to DB: {e}")
 
     if settings.is_telegram_configured:
         try:
-            url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {"chat_id": settings.TELEGRAM_CHAT_ID, "text": formatted_msg, "parse_mode": "HTML"}
+            url = (
+                f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+            )
+            payload = {
+                "chat_id": settings.TELEGRAM_CHAT_ID,
+                "text": formatted_msg,
+                "parse_mode": "HTML",
+            }
             res = requests.post(url, json=payload, timeout=10)
             if res.status_code == 200:
                 return f"Telegram notification sent successfully (Level: {level})."
@@ -161,10 +185,15 @@ def send_telegram_trade_signal(signal_data: str) -> str:
         )
 
         inline_keyboard = {
-            "inline_keyboard": [[
-                {"text": "✅ APPROVE TRADE", "callback_data": f"approve:{signal_id}"},
-                {"text": "❌ REJECT TRADE", "callback_data": f"reject:{signal_id}"},
-            ]]
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "✅ APPROVE TRADE",
+                        "callback_data": f"approve:{signal_id}",
+                    },
+                    {"text": "❌ REJECT TRADE", "callback_data": f"reject:{signal_id}"},
+                ]
+            ]
         }
 
         url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -179,7 +208,9 @@ def send_telegram_trade_signal(signal_data: str) -> str:
             result = res.json()
             message_id = result.get("result", {}).get("message_id", 0)
             logger.info(f"Trade signal sent to Telegram. message_id={message_id}")
-            return f"Trade signal sent to Telegram successfully. message_id={message_id}"
+            return (
+                f"Trade signal sent to Telegram successfully. message_id={message_id}"
+            )
         return f"Telegram API error {res.status_code}: {res.text}"
     except Exception as e:
         logger.error(f"send_telegram_trade_signal failed: {e}")
