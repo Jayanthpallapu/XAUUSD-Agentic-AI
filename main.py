@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import json
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -549,128 +550,86 @@ def restart_agent(name: str):
 
 
 AGENT_STATIC_METADATA = {
+    "NewsResearchAgent": {
+        "goal": "Research and analyze all gold-relevant news, economic events, Fed communications, inflation data, and geopolitical factors to determine fundamental gold sentiment.",
+        "backstory": "Veteran Financial Journalist and Macro Analyst. Monitors breaking geopolitical events, central bank announcements, CPI/PPI releases, FOMC speeches. Hawkish Fed = bearish gold; dovish Fed = bullish gold.",
+        "tools": [
+            {"name": "fetch_gold_price", "description": "Fetches real-time Gold spot price."},
+            {"name": "fetch_news_rss", "description": "Google News RSS for gold/forex queries."},
+            {"name": "analyze_news_sentiment", "description": "Alpha Vantage news sentiment scoring."},
+            {"name": "fetch_economic_calendar", "description": "Daily economic calendar events."},
+            {"name": "scrape_kitco_news", "description": "Live Kitco gold news scraper."},
+            {"name": "scrape_forex_factory_calendar", "description": "Forex Factory high-impact events."},
+            {"name": "fetch_finnhub_news", "description": "Finnhub professional market news."},
+            {"name": "fetch_alpha_vantage_sentiment", "description": "Alpha Vantage XAU/USD sentiment scores."},
+        ],
+    },
     "CorrelationAgent": {
-        "goal": "Analyze prices and financial news of correlated instruments to determine their net impact on Gold price (XAUUSD).",
-        "backstory": "You are a Senior Quantitative Analyst specializing in macro correlations. You analyze DXY, EURUSD, US10Y yields, Bitcoin, VIX, Silver, Oil, Copper, and S&P500 to evaluate if macro trends are net bullish or bearish for Gold. You calculate correlation alignments and support decisions with data.",
+        "goal": "Analyze DXY, US10Y yields, commodities, crypto, and equity indices to determine their combined net impact on Gold (XAUUSD).",
+        "backstory": "Senior Quantitative Analyst specializing in macro correlations. DXY rising = bearish gold. US10Y yields rising = bearish gold. VIX spiking = bullish gold. FRED API provides official yield data.",
         "tools": [
-            {
-                "name": "fetch_forex_prices",
-                "description": "Fetches current exchange rate for key forex currency pairs.",
-            },
-            {
-                "name": "fetch_commodities_prices",
-                "description": "Fetches current price of key commodity pairs (Oil, Silver, Copper).",
-            },
-            {
-                "name": "fetch_crypto_prices",
-                "description": "Fetches current price of key cryptocurrencies (BTC, ETH).",
-            },
-            {
-                "name": "fetch_market_indices",
-                "description": "Fetches key stock indices values (S&P500, VIX, DXY).",
-            },
-            {
-                "name": "fetch_treasury_yields",
-                "description": "Fetches 10-Year U.S. Treasury Bond yields.",
-            },
-            {
-                "name": "fetch_news_rss",
-                "description": "Fetches latest financial news RSS feed for query.",
-            },
-            {
-                "name": "scrape_kitco_news",
-                "description": "Scrapes Kitco Gold news and runs sentiment analysis.",
-            },
+            {"name": "fetch_forex_prices", "description": "DXY, EUR/USD, and key forex pairs."},
+            {"name": "fetch_commodities_prices", "description": "Silver, WTI Oil, Brent, Copper."},
+            {"name": "fetch_crypto_prices", "description": "Bitcoin risk sentiment indicator."},
+            {"name": "fetch_market_indices", "description": "S&P500, VIX, DXY."},
+            {"name": "fetch_treasury_yields", "description": "US 10Y and 2Y Treasury yields via FRED."},
         ],
     },
-    "NewsAgent": {
-        "goal": "Scrape and analyze gold spot news, federal speeches, geopolitical events, and economic announcements to gauge gold market sentiment.",
-        "backstory": "You are a veteran Financial Journalist and Market Sentiment Specialist. You monitor breaking geopolitical events, central bank announcements, CPI inflation releases, and FOMC speeches. You understand how gold price volatility flows back to impact other correlated pairs.",
-        "tools": [
-            {
-                "name": "fetch_gold_price",
-                "description": "Fetches current real-time or near-real-time Gold spot price.",
-            },
-            {
-                "name": "fetch_news_rss",
-                "description": "Fetches latest financial news RSS feed for query.",
-            },
-            {
-                "name": "analyze_news_sentiment",
-                "description": "Analyzes financial text/headlines and grades sentiment (Bullish/Bearish).",
-            },
-            {
-                "name": "fetch_economic_calendar",
-                "description": "Fetches daily economic calendar release schedules.",
-            },
-            {
-                "name": "scrape_kitco_news",
-                "description": "Scrapes Kitco Gold news and runs sentiment analysis.",
-            },
-            {
-                "name": "scrape_forex_factory_calendar",
-                "description": "Scrapes Forex Factory calendar for event impact ratings.",
-            },
-        ],
+    "FundamentalDirectionAgent": {
+        "goal": "Synthesize news research and correlation analysis into BULLISH, BEARISH, or NEUTRAL direction with confidence score.",
+        "backstory": "Chief Fundamental Analyst. Weighs news sentiment vs correlation evidence. If both agree: high confidence. If they disagree: NEUTRAL. High-impact events override everything.",
+        "tools": [],
     },
-    "TradingAgent": {
-        "goal": "Observe how the spot price of Gold is reacting to the compiled news and correlation alignments, and execute simulated paper trades.",
-        "backstory": "You are an Elite Commodity Trader. You receive fundamental correlation sheets and news sentiment reports, watch the live spot price of Gold (XAUUSD), and identify technical entries. You place simulated paper trades (BUY, SELL, or HOLD) with exact entry, stop loss, and take profit levels. Your trade rules require a risk/reward ratio of at least 1:1.5 and careful risk control based on a starting capital of $10,000 USD.",
-        "tools": [
-            {
-                "name": "fetch_gold_price",
-                "description": "Fetches current real-time or near-real-time Gold spot price.",
-            },
-            {
-                "name": "execute_paper_trade",
-                "description": "Executes a simulated paper trade (BUY/SELL) with SL/TP targets.",
-            },
-        ],
+    "TechnicalDirectionAgent": {
+        "goal": "Synthesize all 6 timeframe analyses into final technical directional bias with entry zone and invalidation level.",
+        "backstory": "Head Technical Analyst. Higher timeframe trumps lower. 1W/1D = macro. 4H/1H = swing. 15M/5M = entry. Uses ICT concepts: order blocks, FVG, liquidity pools, market structure.",
+        "tools": [{"name": "fetch_gold_price", "description": "Fetches current gold spot price for entry context."}],
     },
-    "QAAgent": {
-        "goal": "Audit and review the research data, news analysis, and trading signals to ensure logical consistency, correct inputs, and identify improvements.",
-        "backstory": "You are a strict Risk Manager and Quality Auditor. You inspect the output of the researchers and the trading agent. You verify that the trading agent's entries, stop losses, and take profits align with the direction (e.g. SL is below entry for BUY) and make logical sense given the news sentiment. You flag errors, adjust confidence levels, and list improvement suggestions.",
-        "tools": [
-            {
-                "name": "fetch_gold_price",
-                "description": "Fetches current real-time or near-real-time Gold spot price.",
-            }
-        ],
+    "Analyst_1W": {"goal": "Analyze XAU/USD 1-Week timeframe technical structure.", "backstory": "1-Week specialist. Identifies macro trend, weekly OBs, and major S/R zones.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 1W OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 1W price structure."}]},
+    "Analyst_1D": {"goal": "Analyze XAU/USD 1-Day timeframe technical structure.", "backstory": "1-Day specialist. Identifies daily trend, daily OBs, and key daily levels.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 1D OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 1D price structure."}]},
+    "Analyst_4H": {"goal": "Analyze XAU/USD 4-Hour timeframe technical structure.", "backstory": "4H specialist. Identifies intermediate swing structure, 4H OBs, BOS/CHoCH signals.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 4H OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 4H price structure."}]},
+    "Analyst_1H": {"goal": "Analyze XAU/USD 1-Hour timeframe technical structure.", "backstory": "1H specialist. Identifies 1H swing structure, liquidity sweeps, and fair value gaps.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 1H OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 1H price structure."}]},
+    "Analyst_15M": {"goal": "Analyze XAU/USD 15-Minute timeframe for entry trigger confirmation.", "backstory": "15M specialist. Identifies precise entry triggers: engulfing candles, pin bars, BOS on LTF.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 15M OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 15M price structure."}]},
+    "Analyst_5M": {"goal": "Analyze XAU/USD 5-Minute timeframe for precision entry timing.", "backstory": "5M specialist. Provides the most granular entry timing confirmation within the LTF structure.", "tools": [{"name": "fetch_ohlcv_data", "description": "Fetches 5M OHLCV from Twelve Data."}, {"name": "analyze_price_structure", "description": "Analyzes 5M price structure."}]},
+    "QATradeAgent": {
+        "goal": "Validate trade confluence, enforce RR >= 1:3, calculate lot size, and produce APPROVED or REJECTED decision.",
+        "backstory": "Chief Risk Manager. Capital protection is the top priority. Enforces strict rules: confluence required, RR >= 1:3, max 1% account risk. No exceptions.",
+        "tools": [{"name": "fetch_gold_price", "description": "Current gold price for entry validation."}],
+    },
+    "TelegramReportAgent": {
+        "goal": "Send approved trade signals to Telegram with inline Approve/Reject keyboard. Awaits human decision.",
+        "backstory": "Human-in-the-loop gatekeeper. Sends rich formatted trade card to Telegram with inline keyboard. Stores signal as pending_approval until user responds.",
+        "tools": [{"name": "send_telegram_trade_signal", "description": "Sends trade signal with inline keyboard to Telegram."}, {"name": "send_telegram_notification", "description": "Sends general notifications to Telegram."}],
+    },
+    "TradeExecutionAgent": {
+        "goal": "Execute approved paper trades when user clicks Approve in Telegram. Lock the trade journal entry immediately.",
+        "backstory": "Paper Trade Executor. Triggered only by Telegram callback after human approval. Creates an immutable trade journal entry. No agent can modify trades after execution.",
+        "tools": [{"name": "execute_paper_trade", "description": "Executes paper trade to Supabase trade_signals table."}],
+    },
+    "TradeJournalAgent": {
+        "goal": "Write and maintain the immutable trade journal. Each executed trade is locked with locked=True.",
+        "backstory": "Immutable Trade Historian. Writes the final trade record to the trade_journal table with locked=True flag. Only PerformanceAgent may read (never write) these records.",
+        "tools": [],
     },
     "PerformanceAgent": {
-        "goal": "Observe closed trade results, maintain performance records, compile profit metrics, and score the accuracy of all worker agents.",
-        "backstory": "You are a Trading Desk Performance Controller. You calculate performance metrics like win rate, drawdowns, profit factor, and overall portfolio health. You track the accuracy of signals over time and help identify which agents are making logical mistakes.",
-        "tools": [
-            {
-                "name": "fetch_trade_performance",
-                "description": "Fetches cumulative simulated paper trading stats.",
-            }
-        ],
+        "goal": "Observe closed trade results, calculate win rate, PnL, RR achieved, and run attribution analysis.",
+        "backstory": "Trading Desk Performance Controller. Reads closed trade journal entries. Calculates metrics: win rate, drawdown, profit factor, attribution per fundamental vs technical factor. Read-only access to trade journal.",
+        "tools": [{"name": "fetch_trade_performance", "description": "Fetches paper trading stats from trade_signals table."}],
+    },
+    "LearningAgent": {
+        "goal": "Analyze performance data and propose strategy improvements as recommendations. RECOMMENDATION MODE ONLY — no direct changes.",
+        "backstory": "Strategy Improvement Researcher. Analyzes wins vs losses to find patterns. Proposes changes (e.g., 'increase minimum RR to 1:4 for Monday trades'). QATradeAgent must review and approve any recommendation before adoption.",
+        "tools": [{"name": "fetch_trade_performance", "description": "Reads performance data for pattern analysis."}],
     },
     "SupervisorAgent": {
-        "goal": "Oversee the entire Crew, check agent health logs, diagnose stuck node systems, apply constructive teaching feedback, and notify Telegram.",
-        "backstory": "You are the Head Supervisor Agent, equipped with LLM reasoning. You check agent health monitors and restart any nodes in error state. You audit trades and write constructive teacher feedback to guide agents to improve. You compile the daily execution report and publish notifications to the Telegram channel.",
+        "goal": "Monitor all 16 agents, diagnose errors, restart failed nodes, and send daily summary to Telegram.",
+        "backstory": "Chief AI Supervisor. Monitors heartbeats and error counts of all agents. Restarts stuck nodes. Compiles daily execution report. Publishes notifications to Telegram.",
         "tools": [
-            {
-                "name": "check_agent_health",
-                "description": "Queries registry database to check status of agent nodes.",
-            },
-            {
-                "name": "restart_agent_node",
-                "description": "Resets error flag and restarts a stalled agent node.",
-            },
-            {
-                "name": "record_teacher_feedback",
-                "description": "Records supervisor notes on trade signals for future improvement.",
-            },
-            {
-                "name": "fetch_trade_performance",
-                "description": "Fetches cumulative simulated paper trading stats.",
-            },
-            {
-                "name": "send_telegram_notification",
-                "description": "Publishes reports and status alerts to the Telegram bot channel.",
-            },
+            {"name": "check_agent_health", "description": "Checks heartbeats and error counts of all agents."},
+            {"name": "restart_agent_node", "description": "Restarts a failed agent node."},
+            {"name": "record_teacher_feedback", "description": "Records corrective feedback on trades."},
+            {"name": "fetch_trade_performance", "description": "Fetches paper trading stats."},
+            {"name": "send_telegram_notification", "description": "Sends daily summary to Telegram."},
         ],
     },
 }
@@ -717,6 +676,77 @@ def get_agent_details(name: str):
     return response_data
 
 
+# ─────────────────────────────────────────────
+# New Pipeline API Routes
+# ─────────────────────────────────────────────
+
+@app.get("/api/pipeline/signals/pending")
+def get_pending_signals():
+    """Returns all signals currently pending Telegram approval."""
+    signals = db_service.select("pending_signals", {"status": "pending_approval"})
+    return sorted(signals, key=lambda x: x.get("created_at", ""), reverse=True)
+
+
+@app.get("/api/pipeline/signals")
+def get_all_signals():
+    """Returns all trade signals (pending, approved, rejected, executed)."""
+    signals = db_service.select("pending_signals")
+    return sorted(signals, key=lambda x: x.get("created_at", ""), reverse=True)
+
+
+@app.get("/api/pipeline/journal")
+def get_trade_journal():
+    """Returns all locked trade journal entries."""
+    journal = db_service.select("trade_journal")
+    return sorted(journal, key=lambda x: x.get("created_at", ""), reverse=True)
+
+
+@app.get("/api/pipeline/fundamental")
+def get_fundamental_reports():
+    """Returns the latest fundamental research reports."""
+    reports = db_service.select("fundamental_reports")
+    return sorted(reports, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+
+
+@app.get("/api/pipeline/technical")
+def get_technical_reports():
+    """Returns the latest technical research reports."""
+    reports = db_service.select("technical_reports")
+    return sorted(reports, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+
+
+@app.get("/api/pipeline/qa")
+def get_qa_decisions():
+    """Returns the latest QA trade decisions."""
+    decisions = db_service.select("qa_decisions")
+    return sorted(decisions, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+
+
+@app.get("/api/pipeline/learning")
+def get_learning_recommendations():
+    """Returns all learning agent recommendations. adopted=false means pending QA review."""
+    recommendations = db_service.select("learning_recommendations")
+    return sorted(recommendations, key=lambda x: x.get("created_at", ""), reverse=True)
+
+
+@app.post("/api/pipeline/learning/{rec_id}/adopt")
+def adopt_learning_recommendation(rec_id: str):
+    """Marks a learning recommendation as adopted by QA. QA decision only — not auto-applied."""
+    from datetime import datetime
+    recommendations = db_service.select("learning_recommendations")
+    rec = next((r for r in recommendations if r.get("id") == rec_id), None)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found.")
+    db_service.update(
+        "learning_recommendations",
+        {"id": rec_id},
+        {"adopted": True, "adopted_at": datetime.utcnow().isoformat()},
+    )
+    return {"status": "adopted", "recommendation_id": rec_id}
+
+
+
+
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
@@ -744,6 +774,59 @@ async def hermes_telegram_webhook(request: Request):
     global agent_active
     try:
         update = await request.json()
+
+        # ── Inline Keyboard Callback (Trade Approval / Rejection)
+        if "callback_query" in update:
+            callback = update["callback_query"]
+            callback_data = callback.get("data", "")
+            callback_id = callback.get("id", "")
+            message = callback.get("message", {})
+            chat_id = message.get("chat", {}).get("id", settings.TELEGRAM_CHAT_ID)
+            message_id = message.get("message_id")
+
+            # Answer callback query to stop the loading spinner in Telegram UI
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": callback_id, "text": "Processing..."},
+                    timeout=5,
+                )
+            except Exception:
+                pass
+
+            if ":" in callback_data:
+                action, signal_id = callback_data.split(":", 1)
+                if action in ["approve", "reject"]:
+                    from agents.orchestrator.agent import process_telegram_approval
+                    result = process_telegram_approval(signal_id, action)
+
+                    # Update the Telegram message to remove inline keyboard
+                    action_text = "APPROVED ✅" if action == "approve" else "REJECTED ❌"
+                    try:
+                        requests.post(
+                            f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageReplyMarkup",
+                            json={
+                                "chat_id": chat_id,
+                                "message_id": message_id,
+                                "reply_markup": json.dumps({"inline_keyboard": []}),
+                            },
+                            timeout=5,
+                        )
+                        requests.post(
+                            f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": f"Signal {signal_id[:8]}: {action_text}",
+                                "parse_mode": "HTML",
+                            },
+                            timeout=5,
+                        )
+                    except Exception as te:
+                        logger.error(f"Telegram callback response error: {te}")
+
+                    return {"ok": True, "result": result}
+
+        # ── Regular text commands
         await process_telegram_update(
             update=update,
             agent_active=agent_active,

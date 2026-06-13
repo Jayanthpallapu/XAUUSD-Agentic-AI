@@ -21,97 +21,71 @@ except ImportError:
 class MockDatabase:
     """An in-memory database fallback to allow the system to run without credentials."""
 
+    # All 16+ pipeline agent names for status tracking
+    AGENT_DEFINITIONS = [
+        ("NewsResearchAgent",       "Fundamental — News & Sentiment Researcher"),
+        ("CorrelationAgent",         "Fundamental — Macro Correlation Analyst"),
+        ("FundamentalDirectionAgent","Fundamental — Direction Synthesizer"),
+        ("TechnicalDirectionAgent",  "Technical — Multi-Timeframe Synthesizer"),
+        ("Analyst_1W",               "Technical — 1-Week Timeframe Analyst"),
+        ("Analyst_1D",               "Technical — 1-Day Timeframe Analyst"),
+        ("Analyst_4H",               "Technical — 4-Hour Timeframe Analyst"),
+        ("Analyst_1H",               "Technical — 1-Hour Timeframe Analyst"),
+        ("Analyst_15M",              "Technical — 15-Minute Timeframe Analyst"),
+        ("Analyst_5M",               "Technical — 5-Minute Timeframe Analyst"),
+        ("QATradeAgent",             "QA — Risk Manager & Trade Validator"),
+        ("TelegramReportAgent",      "QA — Telegram Signal Publisher"),
+        ("TradeExecutionAgent",      "Execution — Paper Trade Executor"),
+        ("TradeJournalAgent",        "Execution — Immutable Trade Journal"),
+        ("PerformanceAgent",         "Performance — Analytics & Attribution"),
+        ("LearningAgent",            "Performance — Strategy Recommendations (Read-only)"),
+        ("SupervisorAgent",          "Supervisor — System Health & Coordinator"),
+    ]
+
     def __init__(self):
+        agent_registry_seed = [
+            {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "role": role,
+                "status": "active",
+                "config": {},
+                "lessons_learned": [],
+                "last_heartbeat": datetime.utcnow().isoformat(),
+                "avg_response_time_ms": 0.0,
+                "accuracy_score": 1.0,
+                "total_tasks_completed": 0,
+                "total_errors": 0,
+            }
+            for name, role in self.AGENT_DEFINITIONS
+        ]
+
         self.tables: Dict[str, List[Dict[str, Any]]] = {
-            "agent_registry": [
-                {
-                    "id": "11111111-1111-1111-1111-111111111111",
-                    "name": "CorrelationAgent",
-                    "role": "Correlated Pairs & News Analyst",
-                    "status": "active",
-                    "config": {},
-                    "lessons_learned": [],
-                    "last_heartbeat": datetime.utcnow().isoformat(),
-                    "avg_response_time_ms": 0.0,
-                    "accuracy_score": 1.0,
-                    "total_tasks_completed": 0,
-                    "total_errors": 0,
-                },
-                {
-                    "id": "22222222-2222-2222-2222-222222222222",
-                    "name": "NewsAgent",
-                    "role": "XAUUSD News & Impact Analyst",
-                    "status": "active",
-                    "config": {},
-                    "lessons_learned": [],
-                    "last_heartbeat": datetime.utcnow().isoformat(),
-                    "avg_response_time_ms": 0.0,
-                    "accuracy_score": 1.0,
-                    "total_tasks_completed": 0,
-                    "total_errors": 0,
-                },
-                {
-                    "id": "33333333-3333-3333-3333-333333333333",
-                    "name": "TradingAgent",
-                    "role": "Price Reaction Observer & Signal Generator",
-                    "status": "active",
-                    "config": {},
-                    "lessons_learned": [],
-                    "last_heartbeat": datetime.utcnow().isoformat(),
-                    "avg_response_time_ms": 0.0,
-                    "accuracy_score": 1.0,
-                    "total_tasks_completed": 0,
-                    "total_errors": 0,
-                },
-                {
-                    "id": "44444444-4444-4444-4444-444444444444",
-                    "name": "QAAgent",
-                    "role": "Quality Assurance & Improvement Analyst",
-                    "status": "active",
-                    "config": {},
-                    "lessons_learned": [],
-                    "last_heartbeat": datetime.utcnow().isoformat(),
-                    "avg_response_time_ms": 0.0,
-                    "accuracy_score": 1.0,
-                    "total_tasks_completed": 0,
-                    "total_errors": 0,
-                },
-                {
-                    "id": "55555555-5555-5555-5555-555555555555",
-                    "name": "PerformanceAgent",
-                    "role": "Trade Observability & Accuracy Tracker",
-                    "status": "active",
-                    "config": {},
-                    "lessons_learned": [],
-                    "last_heartbeat": datetime.utcnow().isoformat(),
-                    "avg_response_time_ms": 0.0,
-                    "accuracy_score": 1.0,
-                    "total_tasks_completed": 0,
-                    "total_errors": 0,
-                },
-                {
-                    "id": "66666666-6666-6666-6666-666666666666",
-                    "name": "SupervisorAgent",
-                    "role": "Chief AI Officer — System Supervisor",
-                    "status": "active",
-                    "config": {},
-                    "lessons_learned": [],
-                    "last_heartbeat": datetime.utcnow().isoformat(),
-                    "avg_response_time_ms": 0.0,
-                    "accuracy_score": 1.0,
-                    "total_tasks_completed": 0,
-                    "total_errors": 0,
-                },
-            ],
+            # Core registries
+            "agent_registry": agent_registry_seed,
             "analysis_cycles": [],
-            "correlation_reports": [],
-            "gold_news_reports": [],
-            "trade_signals": [],
-            "qa_reports": [],
-            "performance_reports": [],
-            "supervisor_reports": [],
             "notifications": [],
             "audit_log": [],
+            # Fundamental research outputs
+            "fundamental_reports": [],
+            "correlation_reports": [],
+            "gold_news_reports": [],
+            # Technical research outputs
+            "technical_reports": [],
+            # QA trade decisions
+            "qa_decisions": [],
+            "qa_reports": [],
+            # Pending signals awaiting Telegram approval
+            "pending_signals": [],
+            # Locked trade journal (immutable after execution)
+            "trade_journal": [],
+            # Legacy trade signals table (kept for performance tracking tool)
+            "trade_signals": [],
+            # Performance & Learning
+            "performance_reports": [],
+            "learning_recommendations": [],
+            # Supervisor
+            "supervisor_reports": [],
         }
 
     def insert(self, table: str, data: Dict[str, Any]) -> Dict[str, Any]:
