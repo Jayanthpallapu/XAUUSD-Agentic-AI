@@ -1,14 +1,14 @@
 import logging
 import requests
 from datetime import datetime
-from crewai.tools import tool
+from langchain_core.tools import tool
 from config import settings
 from governance.audit.supabase_client import db_service
 
 logger = logging.getLogger("system_tools")
 
 
-@tool("Agent Health Monitor")
+@tool
 def check_agent_health() -> str:
     """
     Checks the status, error count, task count, and accuracy rating
@@ -46,7 +46,7 @@ def check_agent_health() -> str:
         return f"Error retrieving agent health: {str(e)}"
 
 
-@tool("Agent Node Restarter")
+@tool
 def restart_agent_node(agent_name: str) -> str:
     """
     Restarts a malfunctioning or error-state agent node, resetting its error counts
@@ -86,7 +86,7 @@ def restart_agent_node(agent_name: str) -> str:
         return f"Error restarting agent: {str(e)}"
 
 
-@tool("Telegram Notifier")
+@tool
 def send_telegram_notification(title: str, message: str, level: str = "info") -> str:
     """
     Sends a formatted alert or report to the supervisor's Telegram channel/chat.

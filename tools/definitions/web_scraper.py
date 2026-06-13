@@ -13,7 +13,7 @@ Scrapers included:
 import logging
 from datetime import datetime
 from typing import Optional
-from crewai.tools import tool
+from langchain_core.tools import tool
 
 logger = logging.getLogger("web_scraper_tools")
 
@@ -72,7 +72,7 @@ def _get_html(url: str, timeout: int = 15) -> Optional[str]:
     return None
 
 
-@tool("Kitco Gold News Scraper")
+@tool
 def scrape_kitco_news() -> str:
     """
     Scrapes the latest gold market news headlines and summaries from Kitco News.
@@ -235,7 +235,7 @@ def scrape_kitco_news() -> str:
         return f"Error parsing Kitco gold news: {str(e)}"
 
 
-@tool("Forex Factory Calendar Scraper")
+@tool
 def scrape_forex_factory_calendar() -> str:
     """
     Scrapes today's economic calendar events from Forex Factory.

@@ -68,7 +68,7 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
                 return f"{pairs}: {data['price']} (via Twelve Data)"
             elif isinstance(data, dict):
                 for p_key, p_val in data.items():
-                    if "price" in p_val:
+                    if isinstance(p_val, dict) and "price" in p_val:
                         results.append(
                             f"{p_key.replace('/', '')}: {float(p_val['price']):.4f}"
                         )

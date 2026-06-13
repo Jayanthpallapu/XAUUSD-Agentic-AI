@@ -1,6 +1,10 @@
 import logging
+import time
+import requests
+import json
 from typing import Dict, Any
-from crewai import Agent, Task, Crew, Process, LLM
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from config import settings
 from governance.audit.supabase_client import db_service
 from api.schemas.models import (
@@ -45,9 +49,6 @@ from tools.definitions.web_scraper import (
     scrape_kitco_news,
     scrape_forex_factory_calendar,
 )
-
-import time
-import requests
 
 logger = logging.getLogger("crew_setup")
 
@@ -98,7 +99,6 @@ def verify_llm_tool_support(api_key: str, model: str, base_url: str) -> bool:
                 )
         elif res.status_code == 400:
             # HTTP 400 means the endpoint is reachable, key is active, and tool use is supported
-            # (but our minimal verification tool schema/payload format was rejected).
             return True
         else:
             logger.warning(
@@ -109,15 +109,10 @@ def verify_llm_tool_support(api_key: str, model: str, base_url: str) -> bool:
     return False
 
 
-def get_llm(model_name: str = None) -> LLM:
+def get_llm(model_name: str = None) -> ChatOpenAI:
     """
     Returns the best available LLM with Hermes 3 via OpenRouter as primary.
     Failover chain: OpenRouter Hermes 3 → Groq LLaMA-3.3-70B → Groq LLaMA-3.1-8B
-
-    Hermes 3 (NousResearch) is specifically optimized for:
-    - Advanced function calling & structured JSON outputs
-    - Long-context retention across multi-step agent chains
-    - Financial analysis and tool-use reasoning
     """
     global _cached_llm, _cached_llm_time
 
@@ -128,13 +123,13 @@ def get_llm(model_name: str = None) -> LLM:
 
     # Primary: Hermes 3 via OpenRouter
     if settings.OPENROUTER_API_KEY:
-        hermes_model = "openrouter/nousresearch/hermes-3-llama-3.1-405b"
+        hermes_model = "nousresearch/hermes-3-llama-3.1-405b"
         logger.info(f"LLM: Verifying OpenRouter tool support for {hermes_model}...")
         if verify_llm_tool_support(
             settings.OPENROUTER_API_KEY, hermes_model, "https://openrouter.ai/api/v1"
         ):
             try:
-                llm = LLM(
+                llm = ChatOpenAI(
                     model=hermes_model,
                     api_key=settings.OPENROUTER_API_KEY,
                     base_url="https://openrouter.ai/api/v1",
@@ -153,15 +148,16 @@ def get_llm(model_name: str = None) -> LLM:
 
     # Secondary failover: Groq LLaMA-3.3-70B
     if settings.GROQ_API_KEY:
-        groq_model = "groq/llama-3.3-70b-versatile"
+        groq_model = "llama-3.3-70b-versatile"
         logger.info(f"LLM: Verifying Groq tool support for {groq_model}...")
         if verify_llm_tool_support(
             settings.GROQ_API_KEY, groq_model, "https://api.groq.com/openai/v1"
         ):
             try:
-                llm = LLM(
+                llm = ChatOpenAI(
                     model=groq_model,
                     api_key=settings.GROQ_API_KEY,
+                    base_url="https://api.groq.com/openai/v1",
                     temperature=0.2,
                 )
                 logger.info("LLM: Using Groq LLaMA-3.3-70B (failover).")
@@ -182,9 +178,11 @@ def get_llm(model_name: str = None) -> LLM:
         )
 
     logger.warning("LLM: Using Groq LLaMA-3.1-8B-Instant (emergency fallback).")
-    llm = LLM(
-        model="groq/llama-3.1-8b-instant",
+    llm = ChatOpenAI(
+        model="llama-3.1-8b-instant",
         api_key=settings.GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1",
+        temperature=0.2,
     )
     _cached_llm = llm
     _cached_llm_time = current_time
@@ -195,9 +193,6 @@ def fetch_lessons_backstory(agent_name: str) -> str:
     """
     Retrieves agent lessons from Hermes persistent memory (SQLite).
     Falls back to Supabase DB lessons if memory store is empty.
-
-    Hermes memory grows automatically after every cycle — agents
-    accumulate knowledge indefinitely and recall it on every run.
     """
     # Primary: Hermes persistent memory (SQLite — grows with every cycle)
     memory_lessons = hermes_memory.get_lessons(agent_name, k=5)
@@ -222,16 +217,135 @@ def fetch_lessons_backstory(agent_name: str) -> str:
     return ""
 
 
-def create_correlation_agent(llm: LLM) -> Agent:
-    lessons = fetch_lessons_backstory("CorrelationAgent")
-    return Agent(
-        role="Correlated Pairs & News Analyst",
+def run_langchain_agent(
+    llm: ChatOpenAI,
+    role: str,
+    goal: str,
+    backstory: str,
+    tools: list,
+    output_pydantic,
+    prompt_content: str,
+) -> Any:
+    """
+    Executes a LangChain agent with tools in a sequential validation/execution loop,
+    returning a structured Pydantic object model.
+    """
+    logger.info(f"LangChain Agent [{role}]: Starting execution task...")
+    tool_map = {t.name: t for t in tools} if tools else {}
+    llm_with_tools = llm.bind_tools(tools) if tools else llm
+
+    system_prompt = (
+        f"You are the {role}.\n"
+        f"Goal: {goal}\n"
+        f"Backstory: {backstory}\n\n"
+        "You have access to helper tools. Call these tools to gather real-time data or perform "
+        "system actions before providing your final answer.\n"
+        "CRITICAL: When you decide to call a tool, you MUST output ONLY the tool call block. "
+        "Do not write any introductory text, thoughts, explanations, or summaries before or after the tool call. "
+        "Just output the tool call directly. You can write thoughts in your final structured output."
+    )
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=prompt_content),
+    ]
+
+    max_steps = 10
+    step = 0
+    while step < max_steps:
+        step += 1
+        logger.info(f"LangChain Agent [{role}] - Step {step}: Invoking model...")
+        response = llm_with_tools.invoke(messages)
+
+        tool_calls = getattr(response, "tool_calls", [])
+        if not tool_calls:
+            messages.append(response)
+            break
+
+        messages.append(response)
+
+        for tool_call in tool_calls:
+            name = tool_call["name"]
+            args = tool_call["args"]
+            tool_id = tool_call["id"]
+
+            logger.info(
+                f"LangChain Agent [{role}] - Step {step}: Invoking tool '{name}' with args: {args}"
+            )
+            if name in tool_map:
+                try:
+                    result = tool_map[name].invoke(args)
+                    logger.info(
+                        f"LangChain Agent [{role}] - Step {step}: Tool '{name}' returned successfully."
+                    )
+                except Exception as e:
+                    result = f"Error executing tool '{name}': {e}"
+                    logger.error(result)
+            else:
+                result = f"Error: Tool '{name}' is not registered."
+                logger.error(result)
+
+            messages.append(ToolMessage(content=str(result), tool_call_id=tool_id))
+
+    logger.info(f"LangChain Agent [{role}]: Generating structured Pydantic output...")
+
+    # Try default structured output first; fallback to json_mode if unsupported
+    try:
+        llm_structured = llm.with_structured_output(output_pydantic)
+        formatting_messages = messages + [
+            HumanMessage(
+                content=(
+                    "Review the tool results and conversation history above. "
+                    f"Please structure your final analysis into the required output fields for {output_pydantic.__name__}."
+                )
+            )
+        ]
+        final_output = llm_structured.invoke(formatting_messages)
+    except Exception as e:
+        logger.warning(
+            f"Default structured output failed ({e}). Falling back to json_mode..."
+        )
+
+        # Dynamically extract Pydantic model's JSON Schema to inject in prompt
+        if hasattr(output_pydantic, "model_json_schema"):
+            schema_dict = output_pydantic.model_json_schema()
+        else:
+            schema_dict = output_pydantic.schema()
+        schema_str = json.dumps(schema_dict, indent=2)
+
+        llm_structured = llm.with_structured_output(output_pydantic, method="json_mode")
+        formatting_messages = messages + [
+            HumanMessage(
+                content=(
+                    "Review the tool results and conversation history above. "
+                    f"You MUST structure your final analysis into a valid JSON object matching the following Pydantic JSON schema:\n\n"
+                    f"```json\n{schema_str}\n```\n\n"
+                    "Output ONLY the JSON object, starting with '{' and ending with '}', matching the exact fields specified. "
+                    "Do not wrap the JSON object under a class name or model name key."
+                )
+            )
+        ]
+        final_output = llm_structured.invoke(formatting_messages)
+
+    return final_output
+
+
+def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
+    """
+    Replaces the CrewAI orchestration with a sequential LangChain multi-agent flow,
+    maintaining matching database updates, Telegram pushes, and memory auto-saves.
+    """
+    llm = get_llm()
+
+    # 1. Run CorrelationAgent
+    corr_output = run_langchain_agent(
+        llm=llm,
+        role="CorrelationAgent",
         goal="Analyze prices and financial news of correlated instruments to determine their net impact on Gold price (XAUUSD).",
         backstory=(
             "You are a Senior Quantitative Analyst specializing in macro correlations. You analyze DXY, EURUSD, US10Y yields, "
             "Bitcoin, VIX, Silver, Oil, Copper, and S&P500 to evaluate if macro trends are net bullish or bearish for Gold. "
             "You calculate correlation alignments and support decisions with data."
-            f"{lessons}"
+            f"{fetch_lessons_backstory('CorrelationAgent')}"
         ),
         tools=[
             fetch_forex_prices,
@@ -240,157 +354,11 @@ def create_correlation_agent(llm: LLM) -> Agent:
             fetch_market_indices,
             fetch_treasury_yields,
             fetch_news_rss,
-            scrape_kitco_news,  # Hermes: Live Kitco gold news scraping
+            scrape_kitco_news,
         ],
-        llm=llm,
-        allow_delegation=False,
-        max_iter=15,
-        verbose=True,
-    )
-
-
-def create_news_agent(llm: LLM) -> Agent:
-    lessons = fetch_lessons_backstory("NewsAgent")
-    return Agent(
-        role="XAUUSD News & Impact Analyst",
-        goal="Scrape and analyze gold spot news, federal speeches, geopolitical events, and economic announcements to gauge gold market sentiment.",
-        backstory=(
-            "You are a veteran Financial Journalist and Market Sentiment Specialist. You monitor breaking geopolitical events, central bank announcements, "
-            "CPI inflation releases, and FOMC speeches. You understand how gold price volatility flows back to impact other correlated pairs."
-            f"{lessons}"
-        ),
-        tools=[
-            fetch_gold_price,
-            fetch_news_rss,
-            analyze_news_sentiment,
-            fetch_economic_calendar,
-            scrape_kitco_news,  # Hermes: Live Kitco gold news
-            scrape_forex_factory_calendar,  # Hermes: Live Forex Factory impact ratings
-        ],
-        llm=llm,
-        allow_delegation=False,
-        max_iter=15,
-        verbose=True,
-    )
-
-
-def create_trading_agent(llm: LLM) -> Agent:
-    lessons = fetch_lessons_backstory("TradingAgent")
-    return Agent(
-        role="Price Reaction Observer & Signal Generator",
-        goal="Observe how the spot price of Gold is reacting to the compiled news and correlation alignments, and execute simulated paper trades.",
-        backstory=(
-            "You are an Elite Commodity Trader. You receive fundamental correlation sheets and news sentiment reports, watch the live spot price of Gold (XAUUSD), "
-            "and identify technical entries. You place simulated paper trades (BUY, SELL, or HOLD) with exact entry, stop loss, and take profit levels. "
-            "Your trade rules require a risk/reward ratio of at least 1:1.5 and careful risk control based on a starting capital of $10,000 USD."
-            f"{lessons}"
-        ),
-        tools=[fetch_gold_price, execute_paper_trade],
-        llm=llm,
-        allow_delegation=False,
-        max_iter=15,
-        verbose=True,
-    )
-
-
-def create_qa_agent(llm: LLM) -> Agent:
-    lessons = fetch_lessons_backstory("QAAgent")
-    return Agent(
-        role="Quality Assurance & Improvement Analyst",
-        goal="Audit and review the research data, news analysis, and trading signals to ensure logical consistency, correct inputs, and identify improvements.",
-        backstory=(
-            "You are a strict Risk Manager and Quality Auditor. You inspect the output of the researchers and the trading agent. "
-            "You verify that the trading agent's entries, stop losses, and take profits align with the direction (e.g. SL is below entry for BUY) "
-            "and make logical sense given the news sentiment. You flag errors, adjust confidence levels, and list improvement suggestions."
-            f"{lessons}"
-        ),
-        tools=[fetch_gold_price],
-        llm=llm,
-        allow_delegation=False,
-        max_iter=15,
-        verbose=True,
-    )
-
-
-def create_performance_agent(llm: LLM) -> Agent:
-    lessons = fetch_lessons_backstory("PerformanceAgent")
-    return Agent(
-        role="Trade Observability & Accuracy Tracker",
-        goal="Observe closed trade results, maintain performance records, compile profit metrics, and score the accuracy of all worker agents.",
-        backstory=(
-            "You are a Trading Desk Performance Controller. You calculate performance metrics like win rate, drawdowns, profit factor, "
-            "and overall portfolio health. You track the accuracy of signals over time and help identify which agents are making logical mistakes."
-            f"{lessons}"
-        ),
-        tools=[fetch_trade_performance],
-        llm=llm,
-        allow_delegation=False,
-        max_iter=15,
-        verbose=True,
-    )
-
-
-def create_supervisor_agent(llm: LLM) -> Agent:
-    lessons = fetch_lessons_backstory("SupervisorAgent")
-    return Agent(
-        role="Chief AI Officer — System Supervisor",
-        goal="Oversee the entire Crew, check agent health logs, diagnose stuck node systems, apply constructive teaching feedback, and notify Telegram.",
-        backstory=(
-            "You are the Head Supervisor Agent, equipped with LLM reasoning. You check agent health monitors and restart any nodes in error state. "
-            "You audit trades and write constructive teacher feedback to guide agents to improve. "
-            "You compile the daily execution report and publish notifications to the Telegram channel."
-            f"{lessons}"
-        ),
-        tools=[
-            check_agent_health,
-            restart_agent_node,
-            record_teacher_feedback,
-            fetch_trade_performance,
-            send_telegram_notification,
-        ],
-        llm=llm,
-        allow_delegation=True,
-        max_iter=15,
-        verbose=True,
-    )
-
-
-def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
-    llm = get_llm()
-
-    corr_agent = create_correlation_agent(llm)
-    news_agent = create_news_agent(llm)
-    trade_agent = create_trading_agent(llm)
-    qa_agent = create_qa_agent(llm)
-    perf_agent = create_performance_agent(llm)
-    supervisor_agent = create_supervisor_agent(llm)
-
-    corr_task = Task(
-        description="Fetch forex prices, index prices, crypto rates, commodity rates, and treasury yields. Research how correlated markets are moving. Analyze recent correlated news RSS.",
-        expected_output="A structured report evaluating correlation alignment metrics.",
-        agent=corr_agent,
         output_pydantic=CorrelationReport,
+        prompt_content="Fetch forex prices, index prices, crypto rates, commodity rates, and treasury yields. Research how correlated markets are moving. Analyze recent correlated news RSS.",
     )
-
-    news_task = Task(
-        description="Fetch gold spot price, search news RSS for gold market sentiment and economic calendar events. Summarize sentiment and note if any high-impact event (CPI, NFP, GDP, Interest rates) is released today.",
-        expected_output="A structured gold news and economic event impact analysis.",
-        agent=news_agent,
-        output_pydantic=GoldNewsReport,
-    )
-
-    research_crew = Crew(
-        agents=[corr_agent, news_agent],
-        tasks=[corr_task, news_task],
-        process=Process.sequential,
-        verbose=True,
-    )
-
-    logger.info("Starting Research Crew kickoff...")
-    research_results = research_crew.kickoff()
-
-    corr_output = research_results.tasks_output[0].pydantic
-    news_output = research_results.tasks_output[1].pydantic
 
     db_service.insert(
         "correlation_reports",
@@ -403,6 +371,28 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
         },
     )
     db_service.update_agent_status("CorrelationAgent", "active", tasks_delta=1)
+
+    # 2. Run NewsAgent
+    news_output = run_langchain_agent(
+        llm=llm,
+        role="NewsAgent",
+        goal="Scrape and analyze gold spot news, federal speeches, geopolitical events, and economic announcements to gauge gold market sentiment.",
+        backstory=(
+            "You are a veteran Financial Journalist and Market Sentiment Specialist. You monitor breaking geopolitical events, central bank announcements, "
+            "CPI inflation releases, and FOMC speeches. You understand how gold price volatility flows back to impact other correlated pairs."
+            f"{fetch_lessons_backstory('NewsAgent')}"
+        ),
+        tools=[
+            fetch_gold_price,
+            fetch_news_rss,
+            analyze_news_sentiment,
+            fetch_economic_calendar,
+            scrape_kitco_news,
+            scrape_forex_factory_calendar,
+        ],
+        output_pydantic=GoldNewsReport,
+        prompt_content="Fetch gold spot price, search news RSS for gold market sentiment and economic calendar events. Summarize sentiment and note if any high-impact event (CPI, NFP, GDP, Interest rates) is released today.",
+    )
 
     db_service.insert(
         "gold_news_reports",
@@ -417,42 +407,47 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     )
     db_service.update_agent_status("NewsAgent", "active", tasks_delta=1)
 
-    trade_task = Task(
-        description=(
+    # 3. Run TradingAgent
+    trade_output = run_langchain_agent(
+        llm=llm,
+        role="TradingAgent",
+        goal="Observe how the spot price of Gold is reacting to the compiled news and correlation alignments, and execute simulated paper trades.",
+        backstory=(
+            "You are an Elite Commodity Trader. You receive fundamental correlation sheets and news sentiment reports, watch the live spot price of Gold (XAUUSD), "
+            "and identify technical entries. You place simulated paper trades (BUY, SELL, or HOLD) with exact entry, stop loss, and take profit levels. "
+            "Your trade rules require a risk/reward ratio of at least 1:1.5 and careful risk control based on a starting capital of $10,000 USD."
+            f"{fetch_lessons_backstory('TradingAgent')}"
+        ),
+        tools=[fetch_gold_price, execute_paper_trade],
+        output_pydantic=TradeSignal,
+        prompt_content=(
             f"Observe the current gold price. Using the Correlation Report: {corr_output.summary} "
             f"and the Gold News Report: {news_output.summary}, determine if a BUY or SELL setup exists. "
             f"If conditions are mixed or unclear, select HOLD. If placing a trade, call the Paper Trade Executor tool "
             f"with appropriate SL, TP, entry price, and confidence score. Use cycle_id: {cycle_id}."
         ),
-        expected_output="A structured BUY/SELL/HOLD trade signal recommendation.",
-        agent=trade_agent,
-        output_pydantic=TradeSignal,
     )
 
-    qa_task = Task(
-        description=(
-            "Review the research findings, news analysis, and the resulting Trade Signal. "
+    # 4. Run QAAgent
+    qa_output = run_langchain_agent(
+        llm=llm,
+        role="QAAgent",
+        goal="Audit and review the research data, news analysis, and trading signals to ensure logical consistency, correct inputs, and identify improvements.",
+        backstory=(
+            "You are a strict Risk Manager and Quality Auditor. You inspect the output of the researchers and the trading agent. "
+            "You verify that the trading agent's entries, stop losses, and take profits align with the direction (e.g. SL is below entry for BUY) "
+            "and make logical sense given the news sentiment. You flag errors, adjust confidence levels, and list improvement suggestions."
+            f"{fetch_lessons_backstory('QAAgent')}"
+        ),
+        tools=[fetch_gold_price],
+        output_pydantic=QAReport,
+        prompt_content=(
+            f"Review the research findings, news analysis, and the resulting Trade Signal: {trade_output.dict()}. "
             "Audit the trade levels: make sure SL is below entry for BUY, TP is above entry for BUY, etc. "
             "Adjust the trade signal's confidence score if you find logical mistakes or warning signs. "
-            "Write specific actionable improvement suggestions for the agents if they made mistakes."
+            "Write specific actionable improvement suggestions for the trading agent if they made mistakes."
         ),
-        expected_output="A detailed QA audit report approving, rejecting, or adjusting the signal.",
-        agent=qa_agent,
-        output_pydantic=QAReport,
     )
-
-    analysis_crew = Crew(
-        agents=[trade_agent, qa_agent],
-        tasks=[trade_task, qa_task],
-        process=Process.sequential,
-        verbose=True,
-    )
-
-    logger.info("Starting Analysis Crew kickoff...")
-    analysis_results = analysis_crew.kickoff()
-
-    trade_output = analysis_results.tasks_output[0].pydantic
-    qa_output = analysis_results.tasks_output[1].pydantic
 
     db_service.insert(
         "qa_reports",
@@ -478,20 +473,20 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
                 f"QA Agent rejected trade signal. Trade ID {signals[0]['id'][:8]} marked as expired/rejected."
             )
 
-    perf_task = Task(
-        description="Analyze closed trade results using the Trade Performance Fetcher tool. Compile portfolio statistics (win rate, total PnL, drawdowns, Sharpe) and assess current agent performance scores.",
-        expected_output="A compiled portfolio performance and accuracy scorecard.",
-        agent=perf_agent,
+    # 5. Run PerformanceAgent
+    perf_output = run_langchain_agent(
+        llm=llm,
+        role="PerformanceAgent",
+        goal="Observe closed trade results, maintain performance records, compile profit metrics, and score the accuracy of all worker agents.",
+        backstory=(
+            "You are a Trading Desk Performance Controller. You calculate performance metrics like win rate, drawdowns, profit factor, "
+            "and overall portfolio health. You track the accuracy of signals over time and help identify which agents are making logical mistakes."
+            f"{fetch_lessons_backstory('PerformanceAgent')}"
+        ),
+        tools=[fetch_trade_performance],
         output_pydantic=PerformanceReport,
+        prompt_content="Analyze closed trade results using the Trade Performance Fetcher tool. Compile portfolio statistics (win rate, total PnL, drawdowns, Sharpe) and assess current agent performance scores.",
     )
-
-    perf_crew = Crew(
-        agents=[perf_agent], tasks=[perf_task], process=Process.sequential, verbose=True
-    )
-
-    logger.info("Starting Performance Crew kickoff...")
-    perf_results = perf_crew.kickoff()
-    perf_output = perf_results.tasks_output[0].pydantic
 
     db_service.insert(
         "performance_reports",
@@ -510,28 +505,32 @@ def create_market_crew_flow(cycle_id: str) -> Dict[str, Any]:
     )
     db_service.update_agent_status("PerformanceAgent", "active", tasks_delta=1)
 
-    supervisor_task = Task(
-        description=(
+    # 6. Run SupervisorAgent
+    supervisor_output = run_langchain_agent(
+        llm=llm,
+        role="SupervisorAgent",
+        goal="Oversee the entire Crew, check agent health logs, diagnose stuck node systems, apply constructive teaching feedback, and notify Telegram.",
+        backstory=(
+            "You are the Head Supervisor Agent, equipped with LLM reasoning. You check agent health monitors and restart any nodes in error state. "
+            "You audit trades and write constructive teacher feedback to guide agents to improve. "
+            "You compile the daily execution report and publish notifications to the Telegram channel."
+            f"{fetch_lessons_backstory('SupervisorAgent')}"
+        ),
+        tools=[
+            check_agent_health,
+            restart_agent_node,
+            record_teacher_feedback,
+            fetch_trade_performance,
+            send_telegram_notification,
+        ],
+        output_pydantic=SupervisorReport,
+        prompt_content=(
             "Run the Agent Health Monitor tool to diagnose node health. If any node has high error counts, "
             "call the Agent Node Restarter. Write teacher feedback notes for the trading agent if any trades "
             "underperformed or failed QA validation, and use the Teacher Feedback Recorder to submit them. "
             "Draft a comprehensive daily execution summary, and call the Telegram Notifier tool to send it."
         ),
-        expected_output="A summary of supervisor actions taken and system health.",
-        agent=supervisor_agent,
-        output_pydantic=SupervisorReport,
     )
-
-    supervisor_crew = Crew(
-        agents=[supervisor_agent],
-        tasks=[supervisor_task],
-        process=Process.sequential,
-        verbose=True,
-    )
-
-    logger.info("Starting Supervisor Crew kickoff...")
-    supervisor_results = supervisor_crew.kickoff()
-    supervisor_output = supervisor_results.tasks_output[0].pydantic
 
     db_service.insert(
         "supervisor_reports",

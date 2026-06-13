@@ -2,13 +2,13 @@ import logging
 import requests
 import feedparser
 from datetime import datetime
-from crewai.tools import tool
+from langchain_core.tools import tool
 from config import settings
 
 logger = logging.getLogger("news_calendar_tools")
 
 
-@tool("Google News Fetcher")
+@tool
 def fetch_news_rss(query: str = "gold price XAUUSD forex") -> str:
     """
     Fetches the latest financial news related to a query from Google News RSS.
@@ -82,7 +82,7 @@ def fetch_news_rss(query: str = "gold price XAUUSD forex") -> str:
         return f"Error reading news RSS: {str(e)}. Fallback: Fed speech creates high volatility; Gold spot prices trading sideways."
 
 
-@tool("News Sentiment Analyzer")
+@tool
 def analyze_news_sentiment() -> str:
     """
     Fetches official news sentiment statistics from Alpha Vantage (if key configured) or calculates a local summary.
@@ -209,7 +209,7 @@ def analyze_news_sentiment() -> str:
     )
 
 
-@tool("Economic Calendar Fetcher")
+@tool
 def fetch_economic_calendar() -> str:
     """
     Fetches the economic calendar events for the day or week, highlighting high-impact events

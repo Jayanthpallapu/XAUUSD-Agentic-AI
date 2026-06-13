@@ -1,6 +1,6 @@
 import logging
 import requests
-from crewai.tools import tool
+from langchain_core.tools import tool
 from config import settings
 
 logger = logging.getLogger("market_data_tools")
@@ -15,7 +15,7 @@ except ImportError:
     logger.warning("yfinance package not installed. Using raw requests/API fallbacks.")
 
 
-@tool("Gold Price Fetcher")
+@tool
 def fetch_gold_price() -> str:
     """Fetches the current real-time or near-real-time gold price (XAU/USD) in USD."""
     # Try Twelve Data first if configured
@@ -43,7 +43,7 @@ def fetch_gold_price() -> str:
     return "Gold (XAU/USD) Price: $2645.30 USD (Mock Spot Price)"
 
 
-@tool("Forex Pairs Price Fetcher")
+@tool
 def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str:
     """
     Fetches the current exchange rate for key forex currency pairs.
@@ -67,7 +67,7 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
                 return f"{pairs}: {data['price']} (via Twelve Data)"
             elif isinstance(data, dict):
                 for p_key, p_val in data.items():
-                    if "price" in p_val:
+                    if isinstance(p_val, dict) and "price" in p_val:
                         results.append(
                             f"{p_key.replace('/', '')}: {float(p_val['price']):.4f}"
                         )
@@ -116,7 +116,7 @@ def fetch_forex_prices(pairs: str = "EURUSD,USDJPY,GBPUSD,USDCHF,AUDUSD") -> str
     return "Forex Rates: " + ", ".join(returned_mocks) + " (Mock Rates)"
 
 
-@tool("Commodities Price Fetcher")
+@tool
 def fetch_commodities_prices() -> str:
     """Fetches the current prices of correlated commodities: Silver (XAGUSD), WTI Crude Oil, Brent Crude Oil, and Copper."""
     results = []
@@ -144,7 +144,7 @@ def fetch_commodities_prices() -> str:
     return "Commodity Prices: Silver (XAG/USD): $30.50, WTI Crude: $78.20, Brent Crude: $82.40, Copper: $4.15 (Mock Prices)"
 
 
-@tool("Crypto Price Fetcher")
+@tool
 def fetch_crypto_prices() -> str:
     """Fetches the current price of Bitcoin (BTC) in USD."""
     # CoinGecko Demo API
@@ -181,7 +181,7 @@ def fetch_crypto_prices() -> str:
     return "Bitcoin (BTC/USD) Price: $67,450.00 USD (Mock Price)"
 
 
-@tool("Market Indices Fetcher")
+@tool
 def fetch_market_indices() -> str:
     """Fetches the current value of the Dollar Index (DXY), S&P 500 Index, and volatility index (VIX)."""
     results = []
@@ -207,7 +207,7 @@ def fetch_market_indices() -> str:
     return "Market Indices: US Dollar Index (DXY): 104.50, S&P 500: 5300.20, VIX: 13.50 (Mock Indices)"
 
 
-@tool("Treasury Yields Fetcher")
+@tool
 def fetch_treasury_yields() -> str:
     """Fetches the current yield of the US 10-Year Treasury Bond (US10Y)."""
     if settings.FRED_API_KEY:

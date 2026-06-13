@@ -25,7 +25,7 @@ import re
 
 logger = logging.getLogger("flow_manager")
 
-# Thread pool for running synchronous CrewAI agents in parallel async context
+# Thread pool for running synchronous LangChain agents in parallel async context
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="hermes_agent")
 
 

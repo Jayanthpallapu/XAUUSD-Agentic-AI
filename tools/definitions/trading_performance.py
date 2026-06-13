@@ -1,13 +1,13 @@
 import logging
 import uuid
 from datetime import datetime
-from crewai.tools import tool
+from langchain_core.tools import tool
 from governance.audit.supabase_client import db_service
 
 logger = logging.getLogger("trading_performance_tools")
 
 
-@tool("Paper Trade Executor")
+@tool
 def execute_paper_trade(
     direction: str,
     entry_price: float,
@@ -94,7 +94,7 @@ def execute_paper_trade(
         return f"Trade Execution Failed: DB insertion error. ({str(e)})"
 
 
-@tool("Trade Performance Fetcher")
+@tool
 def fetch_trade_performance() -> str:
     """
     Fetches the history of paper trades and calculates performance metrics
@@ -177,7 +177,7 @@ def fetch_trade_performance() -> str:
         return f"Error compiling performance report: {str(e)}"
 
 
-@tool("Teacher Feedback Recorder")
+@tool
 def record_teacher_feedback(trade_id: str, notes: str) -> str:
     """
     Applies constructive educational feedback (teacher notes) to a specific trade.
